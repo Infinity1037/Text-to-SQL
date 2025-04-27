@@ -1,0 +1,2669 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Text-to-SQL 生成式数据分析</title>
+    <style>
+        /* Improved Base Styles */
+        :root {
+            --user-bg-color: #007bff;
+            --ai-bg-color: #f0f2f5; /* Slightly adjusted AI bubble color */
+            --border-color: #dee2e6; /* Main border color */
+            --soft-border-color: #e9ecef; /* Softer border for internal elements */
+            --text-color-primary: #212529;
+            --text-color-secondary: #6c757d;
+            --bg-color: #f8f9fa;
+            --container-bg: #ffffff;
+            --code-bg: #f1f3f5;
+            --button-hover-bg: #0056b3;
+        }
+
+        /* Logo styles */
+        .app-logo {
+            width: 40px;
+            height: 40px;
+            margin-right: 10px;
+            vertical-align: middle;
+        }
+
+        /* 移除之前的水印样式 */
+        body::after {
+            display: none;
+        }
+
+        /* 新的水印样式 - 应用于聊天历史区域 */
+        .chat-history {
+            position: relative;
+            flex-grow: 1;
+            overflow-y: auto;
+            padding: 25px;
+            background-color: var(--container-bg);
+            display: flex;
+            flex-direction: column;
+            gap: 18px; /* Slightly increased space between messages */
+            opacity: 1; /* 确保聊天历史区域完全不透明 */
+            z-index: 1100; /* 确保在水印之上 */
+        }
+
+        /* 添加水印层 */
+        .watermark {
+            position: absolute !important;
+            top: 0 !important;
+            left: 0 !important;
+            width: 100% !important;
+            height: 100% !important;
+            background: url('LOGO.png') no-repeat center center !important;
+            background-size: 800px 800px !important;
+            opacity: 0.9 !important; /* 更高的不透明度 */
+            pointer-events: none !important;
+            z-index: 100 !important; /* 非常高的z-index */
+            background-attachment: fixed !important;
+            border: 5px solid red !important; /* 添加明显边框 */
+            background-color: rgba(0, 0, 255, 0.1) !important; /* 半透明背景 */
+        }
+
+        /* 确保消息气泡位于水印之上 */
+        .message-bubble {
+            position: relative;
+            max-width: 85%; /* Allow slightly wider bubbles */
+            padding: 14px 18px; /* Slightly increase vertical padding */
+            border-radius: 20px;
+            line-height: 1.65; /* Improved line height for readability */
+            word-wrap: break-word;
+            transition: transform 0.15s ease-out; /* Add subtle hover transition */
+            opacity: 1; /* 确保消息气泡完全不透明 */
+            background-color: var(--ai-bg-color); /* 默认背景色 */
+            box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1); /* 添加轻微阴影提高可见度 */
+        }
+
+        .app-header {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin-bottom: 15px;
+        }
+
+        * { box-sizing: border-box; }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, 'Open Sans', 'Helvetica Neue', sans-serif;
+            margin: 0;
+            background-color: var(--bg-color);
+            display: flex;
+            flex-direction: row;
+            height: 100vh;
+            padding: 0;
+            overflow: hidden;
+        }
+
+        .chat-container {
+            display: flex;
+            flex-direction: row;
+            height: 100vh;
+            width: 100vw;
+            max-width: none;
+            border-radius: 0;
+            border: none;
+            box-shadow: none;
+        }
+
+        #sidebar {
+            width: 260px;
+            flex-shrink: 0; /* Prevent sidebar from shrinking */
+            background-color: #e9ecef; /* Sidebar background */
+            border-right: 1px solid var(--border-color);
+            display: flex;
+            flex-direction: column;
+            height: 100%;
+            padding: 15px 0; /* Padding top/bottom, no side padding needed */
+            overflow-y: auto;
+            transition: width 0.3s ease, padding 0.3s ease; /* Add transition */
+            position: relative; /* Added for potential future absolute elements inside */
+            overflow-x: hidden; /* Hide content horizontally when collapsing */
+        }
+
+        #sidebar.sidebar-collapsed {
+             width: 0;
+             padding-left: 0;
+             padding-right: 0;
+             border-right: none; /* Hide border when collapsed */
+             /* overflow is handled by individual elements now */
+        }
+        /* Hide content within the sidebar smoothly */
+        #sidebar.sidebar-collapsed > * {
+             opacity: 0;
+             transition: opacity 0.1s ease;
+             pointer-events: none; /* Prevent interaction when hidden */
+        }
+
+        .sidebar-header {
+             padding: 15px 15px 10px 15px; /* Adjusted padding */
+             border-bottom: 1px solid var(--border-color);
+             margin-bottom: 10px;
+             text-align: center; /* Center align header content */
+        }
+        /* App Title Style */
+        .app-title {
+             font-size: 1.25em; /* Slightly larger */
+             font-weight: 600;
+             color: var(--user-bg-color); /* Use primary color */
+             margin-bottom: 8px; /* Space below title */
+             margin-top: 0;
+             display: inline-block;
+        }
+        .sidebar-header h2 {
+             margin: 0 0 15px 0; /* Adjusted margin */
+             font-size: 0.9em; /* Slightly smaller */
+             color: var(--text-color-secondary); /* Grey out history title */
+             font-weight: 500;
+             text-transform: uppercase; /* Optional: Uppercase for distinction */
+             letter-spacing: 0.5px;
+        }
+        #sidebar-new-chat-btn {
+             width: 100%;
+             padding: 8px 12px;
+             background-color: var(--user-bg-color);
+             color: white;
+             border: none;
+             border-radius: 6px;
+             cursor: pointer;
+             font-size: 0.9em;
+             display: flex;
+             align-items: center;
+             justify-content: center;
+             gap: 6px;
+             transition: background-color 0.2s ease; /* Add transition */
+        }
+        #sidebar-new-chat-btn:hover {
+             background-color: var(--button-hover-bg);
+        }
+        #sidebar-new-chat-btn svg {
+             width: 16px; height: 16px;
+        }
+
+        #conversation-list {
+            list-style: none;
+            padding: 0;
+            margin: 0;
+            flex-grow: 1;
+            overflow-y: auto;
+        }
+
+        #conversation-list li {
+            padding: 12px 18px; /* Adjusted padding */
+            cursor: pointer;
+            border-bottom: 1px solid #d5dbe1;
+            font-size: 0.92em; /* Slightly larger font */
+            color: #333;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            position: relative;
+        }
+         #conversation-list li:last-child {
+             border-bottom: none;
+         }
+
+        #conversation-list li:hover {
+            background-color: #d5dbe1;
+            transition: background-color 0.15s ease-in-out; /* Add smooth transition */
+        }
+
+        #conversation-list li.active {
+            background-color: #007bff; /* Match user bubble color */
+            color: white;
+            font-weight: 600; /* Slightly bolder */
+        }
+
+        .main-content {
+            flex-grow: 1;
+            display: flex;
+            flex-direction: column;
+            height: 100%;
+            overflow: hidden;
+            background-color: var(--container-bg);
+            position: relative; /* Needed for absolute positioning of toggle button */
+        }
+
+        .chat-history {
+             border-bottom: 1px solid var(--border-color);
+             height: auto;
+        }
+
+        .bottom-area {
+             flex-shrink: 0;
+             background-color: #f0f2f5; /* Slightly different background */
+             border-top: 1px solid var(--border-color);
+             padding: 18px 22px; /* Adjust padding */
+             box-shadow: 0 -2px 5px rgba(0, 0, 0, 0.04); /* Subtle top shadow */
+             position: relative; /* Needed for potential z-index */
+             z-index: 1100; /* 确保在水印之上 */
+             opacity: 1; /* 确保底部区域完全不透明 */
+        }
+
+        /* --- Chat History Area --- */
+        .chat-history {
+            flex-grow: 1;
+            overflow-y: auto;
+            padding: 25px;
+            background-color: var(--container-bg);
+            display: flex;
+            flex-direction: column;
+            gap: 18px; /* Slightly increased space between messages */
+            position: relative;
+            z-index: 20; /* 确保聊天历史区域在水印之上 */
+        }
+
+        .message-bubble {
+            max-width: 85%; /* Allow slightly wider bubbles */
+            padding: 14px 18px; /* Slightly increase vertical padding */
+            border-radius: 20px;
+            line-height: 1.65; /* Improved line height for readability */
+            word-wrap: break-word;
+            transition: transform 0.15s ease-out; /* Add subtle hover transition */
+            position: relative;
+            z-index: 30; /* 确保消息气泡在水印之上 */
+        }
+
+        .user-message {
+            background-color: var(--user-bg-color);
+            color: white;
+            border-bottom-right-radius: 5px;
+            align-self: flex-end;
+            margin-left: auto;
+            opacity: 1; /* 确保用户消息完全不透明 */
+        }
+
+        .user-message:hover {
+            transform: scale(1.01); /* Slight scale on hover */
+        }
+
+        .ai-message {
+            background-color: var(--ai-bg-color);
+            color: var(--text-color-primary);
+            border-bottom-left-radius: 5px;
+            align-self: flex-start;
+            margin-right: auto;
+            opacity: 1; /* 确保AI消息完全不透明 */
+        }
+
+         .ai-message p:first-child {
+            margin-top: 0;
+         }
+         .ai-message p:last-child {
+             margin-bottom: 0;
+         }
+
+        .ai-message h5 {
+             margin-bottom: 8px;  /* Increased bottom margin */
+             margin-top: 18px;  /* Increased top margin for separation */
+             font-size: 0.9em;
+             color: #333; /* Darker heading */
+             font-weight: 600;
+             padding-bottom: 4px; /* Space under heading */
+             border-bottom: 1px solid var(--soft-border-color); /* Use softer border */
+             display: inline-block; /* Make border fit content */
+          }
+          .ai-message h5:first-of-type {
+              margin-top: 12px; /* Adjust first heading margin */
+          }
+
+        .sql-code {
+            font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, Courier, monospace; /* Keep monospace font */
+            background-color: var(--container-bg); /* Match data table background */
+            padding: 12px;
+            border-radius: 8px;
+            display: block;
+            overflow-x: auto;
+            font-size: 0.88em; /* Ensure consistent font size with table */
+            border: 1px solid #e0e0e0;
+            color: #343a40; /* Match table data color */
+            white-space: pre-wrap; /* Keep wrapping */
+            margin-top: 8px; /* Remove !important if possible */
+            margin-bottom: 10px; /* Add bottom margin */
+            /* background-color: #fdfdfd; Slightly different bg */
+        }
+        .sql-code code { font-family: inherit; }
+
+        .data-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 8px; /* Remove !important if possible */
+            margin-bottom: 10px; /* Add bottom margin */
+            font-size: 0.88em;
+            background-color: var(--container-bg);
+            border: 1px solid var(--soft-border-color); /* Use softer border */
+            border-radius: 8px;
+            overflow: auto; /* Scroll if too wide */
+            /* background-color: #fdfdfd; Slightly different bg */
+        }
+        .data-table th, .data-table td {
+            border: 1px solid var(--soft-border-color); /* Use softer border */
+            padding: 9px 12px;
+            text-align: left;
+            white-space: nowrap; /* Prevent wrapping in cells initially */
+        }
+        .data-table th {
+            background-color: #f9f9fb; /* Slightly different header bg */
+            font-weight: 600;
+            color: #495057;
+        }
+         .data-table td {
+             color: #343a40;
+         }
+
+        .loading-message {
+            font-style: italic;
+            color: var(--text-color-secondary);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 10px 0;
+        }
+        .loading-message svg {
+            animation: spin 1s linear infinite;
+            margin-right: 8px;
+        }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+
+        .error-message {
+            background-color: #f8d7da !important; /* Ensure override */
+            color: #721c24 !important;
+            border: 1px solid #f5c6cb;
+        }
+
+        /* --- Bottom Area Container --- */
+        .bottom-area {
+            background-color: #f0f2f5; /* Slightly different background */
+            border-top: 1px solid var(--border-color);
+            padding: 18px 22px; /* Adjust padding */
+            box-shadow: 0 -2px 5px rgba(0, 0, 0, 0.04); /* Subtle top shadow */
+            position: relative; /* Needed for potential z-index */
+            z-index: 50; /* Ensure it's above chat history scroll */
+        }
+
+        /* --- DB Management Area (Now at bottom) --- */
+        .db-management-area {
+            display: flex;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 8px; /* Reduced gap */
+            margin-bottom: 15px; /* Space above input area */
+            padding: 0; /* Removed padding as it's in .bottom-area */
+            background-color: transparent; /* Inherit from bottom-area */
+            border-bottom: none; /* Remove border */
+        }
+
+        .db-management-area label {
+            margin-bottom: 0;
+            font-weight: 500; /* Slightly less bold */
+            color: #495057;
+            font-size: 0.9em;
+            white-space: nowrap;
+        }
+
+        .db-management-area select {
+            transition: border-color 0.2s ease, box-shadow 0.2s ease; /* Add transition */
+            flex-grow: 1;
+            max-width: 250px; /* Limit max width */
+            height: 32px; /* Smaller height */
+            padding: 0 8px;
+            margin: 0;
+            border: 1px solid #ced4da;
+            border-radius: 6px;
+            font-size: 0.9em;
+            background-color: var(--container-bg);
+        }
+
+        .db-management-area select:focus {
+            outline: none;
+            border-color: #80bdff;
+            box-shadow: 0 0 0 0.2rem rgba(0, 123, 255, 0.25);
+        }
+
+        .db-management-area button {
+            padding: 5px 10px;
+            font-size: 0.8em;
+            border-radius: 6px;
+            cursor: pointer;
+            border: none;
+            color: white;
+            margin: 0;
+            white-space: nowrap;
+            display: inline-flex; /* Align icon and text */
+            align-items: center;
+            gap: 4px; /* Space between icon and text */
+        }
+        .db-management-area button svg {
+             width: 14px;
+             height: 14px;
+             transition: background-color 0.2s ease; /* Add transition to buttons */
+        }
+
+        #new-chat-btn {
+             transition: background-color 0.2s ease; /* Add transition */
+             background-color: #6c757d; /* Grey */
+         }
+         #new-chat-btn:hover {
+             background-color: #5a6268;
+         }
+
+        #add-db-btn {
+            transition: background-color 0.2s ease; /* Add transition */
+            background-color: #28a745;
+        }
+        #add-db-btn:hover {
+            background-color: #218838;
+        }
+
+        #delete-db-btn {
+            transition: background-color 0.2s ease, color 0.2s ease, opacity 0.2s ease; /* Add transition */
+            background-color: #dc3545;
+        }
+        #delete-db-btn:hover:not(:disabled) {
+             background-color: #c82333;
+             line-height: 1; /* Reset line height */
+         }
+        #delete-db-btn:disabled {
+             background-color: #e9ecef;
+             color: #adb5bd;
+             opacity: 0.65;
+             cursor: not-allowed;
+         }
+
+        /* --- Chat Input Area --- */
+        .chat-input-area {
+            display: flex;
+            align-items: flex-end; /* Align items to bottom for multi-line */
+            padding: 0; /* Removed padding as it's in .bottom-area */
+            background-color: transparent; /* Inherit from bottom-area */
+            border-top: none; /* Remove border */
+        }
+
+        #chat-input {
+            flex-grow: 1;
+            padding: 10px 15px;
+            border: 1px solid #ced4da;
+            border-radius: 18px;
+            margin-right: 10px;
+            font-size: 1.15em; /* Increased font size again */
+            font-weight: 500; /* Set font weight to medium */
+            resize: none;
+            line-height: 1.5;
+            min-height: 38px; /* Ensure minimum height */
+            max-height: 120px;
+            overflow-y: auto;
+            background-color: var(--container-bg);
+            color: var(--text-color-primary);
+        }
+        #chat-input:focus {
+             outline: none;
+             border-color: #80bdff;
+             box-shadow: 0 0 0 0.2rem rgba(0, 123, 255, 0.25);
+        }
+
+        #send-button {
+            height: 38px; /* Match input height */
+            width: 38px; /* Square button for icon */
+            padding: 0;
+            border: none;
+            background-color: var(--user-bg-color);
+            color: white;
+            border-radius: 50%; /* Circle */
+            cursor: pointer;
+            font-size: 1.2em;
+            transition: background-color 0.2s ease;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            flex-shrink: 0; /* Prevent shrinking */
+        }
+
+        #send-button:hover {
+            background-color: var(--button-hover-bg);
+        }
+        #send-button:disabled {
+             background-color: #adb5bd;
+             cursor: not-allowed;
+             opacity: 0.7;
+         }
+        #send-button svg {
+             width: 20px;
+             height: 20px;
+        }
+
+        /* --- Modal Styles (Reinforce Centering) --- */
+        .modal {
+            display: none; /* Keep hidden by default */
+            position: fixed;
+            z-index: 1000;
+            left: 0;
+            top: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0, 0, 0, 0.6);
+            /* Ensure Flexbox is used for centering */
+            display: flex; /* Reaffirm */
+            align-items: center; /* Vertical center */
+            justify-content: center; /* Horizontal center */
+            padding: 20px;
+            overflow-y: auto;
+        }
+
+        .modal-content {
+            background-color: var(--container-bg);
+            position: relative;
+            padding: 25px 30px;
+            border: none;
+            width: 90%;
+            max-width: 550px;
+            border-radius: 10px;
+            box-shadow: 0 5px 15px rgba(0,0,0,0.1); /* Slightly softer shadow */
+            /* Explicitly remove margin auto if flex is parent */
+            margin: 0; /* Let flexbox handle centering */
+            overflow-y: auto;
+            max-height: 90vh;
+            display: block; /* Ensure it's not display:flex itself unless needed */
+        }
+
+        .modal-content h2 {
+             margin-top: 0;
+             margin-bottom: 20px;
+             color: var(--text-color-primary);
+             font-weight: 600;
+             text-align: left;
+             border-bottom: 1px solid var(--border-color);
+             padding-bottom: 10px;
+        }
+
+        .close-btn {
+            color: #888; /* Lighter grey */
+            position: absolute;
+            top: 12px;
+            right: 15px;
+            font-size: 26px;
+            font-weight: bold;
+            line-height: 1;
+             padding: 0 5px; /* Easier to click */
+        }
+
+        .close-btn:hover,
+        .close-btn:focus-visible { /* Better focus styling */
+            color: #333; /* Darker on hover */
+            text-decoration: none;
+            cursor: pointer;
+            outline: 2px solid #80bdff; /* Focus outline */
+            outline-offset: 2px;
+        }
+
+        #add-db-form label {
+            margin-top: 12px; /* Slightly more space */
+            margin-bottom: 4px;
+            font-size: 0.9em;
+            color: #495057;
+             font-weight: 500;
+        }
+
+        #add-db-form input[type=text],
+        #add-db-form input[type=number],
+        #add-db-form input[type=password],
+        #add-db-form select,
+        #add-db-form textarea {
+             width: 100%; /* Use 100% width */
+             margin-bottom: 10px;
+             padding: 9px 12px; /* Adjusted padding */
+             font-size: 0.95em;
+             border: 1px solid #ced4da;
+             border-radius: 6px;
+             background-color: #fff; /* Ensure bg color */
+             box-sizing: border-box; /* Include padding/border in width */
+        }
+        #add-db-form input:focus,
+        #add-db-form select:focus,
+        #add-db-form textarea:focus {
+              border-color: #80bdff;
+              outline: 0;
+              box-shadow: 0 0 0 0.2rem rgba(0, 123, 255, 0.25);
+        }
+
+        #add-db-form textarea {
+            resize: vertical;
+            min-height: 50px;
+        }
+        #add-db-form select {
+            height: 38px; /* Consistent height */
+        }
+
+        #modal-message-area {
+            margin-top: 15px;
+            min-height: 1.2em;
+            font-weight: 500; /* Slightly less bold */
+            font-size: 0.9em;
+            text-align: center;
+        }
+
+        .modal-actions {
+            margin-top: 25px;
+            text-align: right;
+            border-top: 1px solid var(--border-color);
+            padding-top: 15px;
+        }
+
+        .modal-actions button {
+            transition: background-color 0.2s ease, color 0.2s ease, border-color 0.2s ease; /* Add transition */
+            margin-left: 10px;
+            display: inline-block;
+            width: auto;
+            padding: 8px 16px;
+            font-size: 0.9em;
+             border-radius: 6px;
+             border: none;
+             cursor: pointer;
+        }
+        #test-conn-btn {
+            transition: background-color 0.2s ease; /* Ensure transition */
+            background-color: #e9ecef;
+            color: #495057;
+            border: 1px solid #ced4da;
+        }
+         #test-conn-btn:hover {
+             background-color: #ced4da;
+         }
+        #save-db-btn {
+            background-color: var(--user-bg-color);
+            color: white;
+        }
+         #save-db-btn:hover {
+             background-color: var(--button-hover-bg);
+         }
+        #cancel-db-btn {
+            background-color: transparent;
+            color: var(--text-color-secondary);
+            border: 1px solid transparent;
+        }
+        #cancel-db-btn:hover {
+             text-decoration: underline;
+        }
+
+        /* --- End Modal Styles --- */
+
+        /* Scrollbar Styling (WebKit Browsers) */
+        ::-webkit-scrollbar {
+            width: 8px;
+            height: 8px;
+        }
+        ::-webkit-scrollbar-track {
+            background: #f1f1f1;
+            border-radius: 10px;
+        }
+        ::-webkit-scrollbar-thumb {
+            background: #ccc;
+            border-radius: 10px;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: #aaa;
+        }
+        /* Apply to specific elements if needed */
+        .chat-history::-webkit-scrollbar,
+        #chat-input::-webkit-scrollbar {
+            /* Inherits general styles */
+        }
+
+        /* Style for delete conversation button */
+        .delete-conv-btn {
+            position: absolute;
+            right: 8px;
+            top: 50%;
+            transform: translateY(-50%);
+            font-size: 1.1em;
+            color: #aaa; /* Default color */
+            cursor: pointer;
+            padding: 2px 5px;
+            line-height: 1;
+            border-radius: 3px;
+            display: none; /* Hidden by default */
+        }
+        #conversation-list li:hover .delete-conv-btn {
+             display: inline-block; /* Show on hover */
+             color: #dc3545; /* Danger color on hover */
+        }
+        #conversation-list li.active .delete-conv-btn {
+            color: #f8d7da; /* Lighter color when row is active */
+             display: inline-block; /* Keep visible if active */
+        }
+        #conversation-list li.active:hover .delete-conv-btn {
+             color: #f5c6cb; /* Slightly darker on hover when active */
+        }
+        .delete-conv-btn:hover {
+            background-color: rgba(0, 0, 0, 0.1);
+        }
+
+        /* --- NEW: Conversation Group Header Styles --- */
+        #conversation-list .group-header {
+            padding: 8px 15px 4px 15px; /* Adjust padding */
+            font-size: 0.8em;
+            font-weight: 600;
+            color: var(--text-color-secondary);
+            background-color: #f8f9fa; /* Slightly different background */
+            border-top: 1px solid var(--border-color); /* Separator line above */
+            border-bottom: none; /* Remove bottom border if needed */
+            margin-top: 5px; /* Space above header */
+            cursor: default; /* Not clickable */
+            text-transform: uppercase; /* Optional */
+            letter-spacing: 0.5px;
+            position: sticky; /* Make headers sticky */
+            top: 0; /* Stick to the top of the scrollable container */
+            z-index: 10; /* Ensure header is above conversation items */
+        }
+        #conversation-list .group-header:first-child {
+             margin-top: 0; /* No top margin for the very first header */
+             border-top: none; /* No top border for the very first header */
+        }
+        /* Adjust conversation item borders if headers are present */
+        #conversation-list li:not(.group-header) {
+             /* Optional: remove top border if header provides it */
+             /* border-top: none; */
+        }
+        /* --- End NEW Styles --- */
+
+        /* --- End Sidebar --- */
+
+        /* --- Toggle Sidebar Button --- */
+        #sidebar-toggle-btn {
+            position: absolute;
+            top: 12px;
+            left: 12px; /* Initial position relative to main-content */
+            z-index: 1100; /* Above sidebar */
+            background-color: rgba(255, 255, 255, 0.8);
+            border: 1px solid #dee2e6;
+            border-radius: 50%;
+            width: 30px;
+            height: 30px;
+            padding: 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+            transition: background-color 0.2s ease; /* Only transition color */
+            color: #495057;
+        }
+        #sidebar-toggle-btn:hover {
+             background-color: #f8f9fa;
+        }
+        #sidebar-toggle-btn svg {
+             width: 18px;
+             height: 18px;
+        }
+        #sidebar-toggle-btn .icon-collapse,
+         #sidebar-toggle-btn .icon-expand {
+             display: none; /* Hide both icons by default */
+         }
+        /* Show collapse icon when sidebar is expanded */
+        body:not(.sidebar-collapsed-state) #sidebar-toggle-btn .icon-collapse {
+             display: block;
+         }
+        /* Show expand icon when sidebar is collapsed */
+        body.sidebar-collapsed-state #sidebar-toggle-btn .icon-expand {
+            display: block;
+        }
+
+        /* --- Copy Button Styles --- */
+        .copy-btn {
+            position: absolute;
+            top: 5px; /* Adjust as needed */
+            right: 5px; /* Adjust as needed */
+            background-color: #f8f9fa;
+            border: 1px solid #dee2e6;
+            color: #495057;
+            padding: 3px 6px;
+            cursor: pointer;
+            border-radius: 4px;
+            font-size: 0.8em;
+            line-height: 1;
+            opacity: 0.7;
+            transition: opacity 0.2s ease, background-color 0.2s ease;
+            z-index: 10; /* Ensure it's above code/table background */
+        }
+        .copy-btn:hover {
+            opacity: 1;
+            background-color: #e9ecef;
+        }
+        .copy-btn svg {
+             display: block; /* Prevent extra space below */
+        }
+        .copy-btn.copied {
+            background-color: #28a745;
+            color: white;
+            border-color: #28a745;
+            transition: background-color 0.2s ease; /* Add transition */
+        }
+        .copy-btn.copied svg {
+             /* Optional: Change icon to a checkmark? Requires different SVG */
+        }
+
+        /* --- Regenerate Button Styles --- */
+        .message-actions {
+             text-align: right; /* Align button to the right */
+             margin-top: 8px;
+         }
+        .regenerate-btn {
+             transition: opacity 0.2s ease, background-color 0.2s ease, color 0.2s ease, border-color 0.2s ease;
+             background: none;
+             border: 1px solid #ced4da;
+             color: #6c757d;
+             padding: 2px 6px;
+             cursor: pointer;
+             border-radius: 4px;
+             font-size: 0.8em;
+             line-height: 1;
+             opacity: 0.8;
+        }
+        .regenerate-btn:hover {
+             opacity: 1;
+             background-color: #e9ecef;
+             border-color: #adb5bd;
+        }
+        .regenerate-btn svg {
+              display: block;
+         }
+
+        .main-content {
+            flex-grow: 1; /* Take remaining space */
+            display: flex;
+            flex-direction: column;
+            height: 100%;
+            overflow: hidden; /* Prevent content overflow */
+            background-color: var(--container-bg); /* Main area background */
+            position: relative; /* Needed for absolute positioning of toggle button */
+        }
+
+        /* --- End Sidebar --- */
+
+        /* --- Toast Notification Styles --- */
+        #toast-container {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            z-index: 2000; /* Above everything */
+            display: flex;
+            flex-direction: column;
+            align-items: flex-end;
+            gap: 10px;
+        }
+        .toast {
+            background-color: rgba(0, 0, 0, 0.8);
+            color: white;
+            padding: 12px 18px;
+            border-radius: 6px;
+            box-shadow: 0 3px 10px rgba(0,0,0,0.2);
+            opacity: 0;
+            transition: opacity 0.3s ease, transform 0.3s ease;
+            transform: translateX(100%); /* Start off-screen */
+            max-width: 300px;
+            font-size: 0.9em;
+            line-height: 1.5;
+        }
+        .toast.show {
+            opacity: 1;
+            transform: translateX(0);
+        }
+        .toast.success {
+             background-color: rgba(40, 167, 69, 0.9); /* Green */
+        }
+        .toast.error {
+             background-color: rgba(220, 53, 69, 0.9); /* Red */
+        }
+        .toast.info {
+             /* Default style is info */
+        }
+
+        .modal-actions button svg {
+            width: 16px; /* Consistent icon size */
+            height: 16px;
+            margin-right: 5px; /* Space between icon and text */
+            vertical-align: middle; /* Align icon with text */
+            position: relative; /* Adjust position slightly if needed */
+            top: -1px;
+        }
+        #test-conn-btn {
+            background-color: #e9ecef;
+            color: #495057;
+            border: 1px solid #ced4da;
+        }
+
+    </style>
+</head>
+<body>
+    <!-- 全屏水印，覆盖整个页面 -->
+    <div id="fullscreen-watermark" style="
+        position: fixed;
+        top: 45%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        width: 100vw;
+        height: 100vh;
+        background: url('LOGO.png') no-repeat center center;
+        background-size: 800px 800px;
+        opacity: 0.04;
+        pointer-events: none;
+        z-index: 1000;
+    "></div>
+    
+    <div class="chat-container">
+        <!-- Sidebar -->
+        <div id="sidebar">
+            <div class="sidebar-header">
+                <div class="app-header">
+                    <img src="LOGO.png" alt="Text-to-SQL Logo" class="app-logo">
+                    <div class="app-title">Text-to-SQL</div>
+                </div>
+                <h2>会话历史</h2>
+                <button id="sidebar-new-chat-btn" type="button">
+                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm4 11h-3v3c0 .55-.45 1-1 1s-1-.45-1-1v-3H8c-.55 0-1-.45-1-1s.45-1 1-1h3V8c0-.55.45-1 1-1s1 .45 1 1v3h3c.55 0 1 .45 1 1s-.45 1-1 1z"></path></svg>
+                     发起新对话
+                 </button>
+            </div>
+            <ul id="conversation-list">
+                <!-- Conversation items will be populated by JS -->
+                 <li class="active">示例对话 1</li>
+                 <li>示例对话 2</li>
+            </ul>
+        </div>
+
+        <!-- Main Content Area -->
+        <div class="main-content">
+            <!-- Sidebar Toggle Button -->
+            <button id="sidebar-toggle-btn" title="切换侧边栏" aria-label="切换侧边栏">
+                <span class="icon-collapse">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" class="bi bi-layout-sidebar-inset-reverse" viewBox="0 0 16 16">
+                      <path d="M1.5 0A1.5 1.5 0 0 0 0 1.5v13A1.5 1.5 0 0 0 1.5 16h13a1.5 1.5 0 0 0 1.5-1.5v-13A1.5 1.5 0 0 0 14.5 0h-13zm13 1a.5.5 0 0 1 .5.5v13a.5.5 0 0 1-.5.5h-13a.5.5 0 0 1-.5-.5v-13a.5.5 0 0 1 .5-.5h13z"/>
+                      <path d="M11.5 14a.5.5 0 0 1-.5-.5v-11a.5.5 0 0 1 .5-.5h2a.5.5 0 0 1 .5.5v11a.5.5 0 0 1-.5.5h-2z"/>
+                    </svg>
+                </span>
+                <span class="icon-expand">
+                     <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" class="bi bi-layout-sidebar-inset" viewBox="0 0 16 16">
+                       <path d="M1.5 0A1.5 1.5 0 0 0 0 1.5v13A1.5 1.5 0 0 0 1.5 16h13a1.5 1.5 0 0 0 1.5-1.5v-13A1.5 1.5 0 0 0 14.5 0h-13zm13 1a.5.5 0 0 1 .5.5v13a.5.5 0 0 1-.5.5h-13a.5.5 0 0 1-.5-.5v-13a.5.5 0 0 1 .5-.5h13z"/>
+                       <path d="M4.5 14a.5.5 0 0 0 .5-.5v-11a.5.5 0 0 0-.5-.5h-2a.5.5 0 0 0-.5.5v11a.5.5 0 0 0 .5.5h2z"/>
+                     </svg>
+                 </span>
+            </button>
+
+            <!-- Chat History -->
+            <div class="chat-history" id="chat-history">
+                <!-- 移除水印层 -->
+                
+                <!-- Initial Welcome Message -->
+                <div class="message-bubble ai-message">
+                    你好！请选择下面的数据库，然后输入你的问题开始分析。
+                </div>
+            </div>
+
+            <!-- Bottom Area (DB Management + Input) -->
+            <div class="bottom-area">
+                <!-- DB Management Area -->
+                <div class="db-management-area">
+                    <label for="db-select">数据库:</label>
+                    <select id="db-select">
+                        <option value="" disabled selected>加载中...</option>
+                    </select>
+                    <!-- Removed New Chat Button from here -->
+                    <button id="add-db-btn" type="button" title="添加新数据库连接" aria-label="添加新数据库连接">
+                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor"><path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"></path></svg>
+                        添加
+                    </button>
+                    <button id="delete-db-btn" type="button" title="删除选中的数据库连接配置" aria-label="删除选中的数据库连接配置" disabled>
+                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zm2.46-7.12l1.41-1.41L12 12.59l2.12-2.12 1.41 1.41L13.41 14l2.12 2.12-1.41 1.41L12 15.41l-2.12 2.12-1.41-1.41L10.59 14l-2.13-2.12zM15.5 4l-1-1h-5l-1 1H5v2h14V4z"></path></svg>
+                        删除
+                    </button>
+                </div>
+
+                <!-- Input Area -->
+                <div class="chat-input-area">
+                    <textarea id="chat-input" placeholder="输入你的问题... (Shift+Enter 换行)" rows="1"></textarea>
+                    <button id="send-button" title="发送" aria-label="发送消息">
+                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor">
+                            <path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"></path>
+                        </svg>
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Add DB Modal (Add asterisks to required labels) -->
+    <div id="add-db-modal" class="modal">
+       <div class="modal-content">
+            <button class="close-btn" title="关闭" aria-label="关闭模态框">&times;</button> <!-- Improved labels -->
+            <h2>添加新的数据库连接</h2>
+            <form id="add-db-form">
+                <label for="db-type">数据库类型:<span style="color:red;">*</span></label>
+                <select id="db-type" required>
+                    <option value="" disabled selected>加载中...</option>
+                </select>
+
+                <label for="db-alias">数据库名称:<span style="color:red;">*</span></label>
+                <input type="text" id="db-alias" required placeholder="例如：my_sales_db">
+
+                <label for="db-host">主机:<span style="color:red;">*</span></label>
+                <input type="text" id="db-host" required placeholder="例如：localhost 或 IP 地址">
+
+                <label for="db-port">端口:<span style="color:red;">*</span></label>
+                <input type="number" id="db-port" required placeholder="例如：3306">
+
+                <label for="db-user">用户名:<span style="color:red;">*</span></label>
+                <input type="text" id="db-user" required>
+
+                <label for="db-password">密码:<span style="color:red;">*</span></label>
+                <input type="password" id="db-password">
+
+                 <label for="db-comment">备注 (可选):</label>
+                 <textarea id="db-comment" rows="2"></textarea>
+
+                 <div id="modal-message-area" style="margin-top: 10px; min-height: 1.2em; font-weight: bold;"></div>
+
+                 <div class="modal-actions">
+                    <button type="button" id="test-conn-btn">
+                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor"><path d="M23 10.5c0-.28-.22-.5-.5-.5H18c-1.1 0-2 .9-2 2v1h-2.5c-.28 0-.5.22-.5.5s.22.5.5.5H16v1c0 1.1.9 2 2 2h4.5c.28 0 .5-.22.5-.5s-.22-.5-.5-.5H18c-.55 0-1-.45-1-1v-4c0-.55.45-1 1-1h5c.28 0 .5-.22.5-.5zM9.5 14H1.5c-.28 0-.5.22-.5.5s.22.5.5.5h8c.28 0 .5-.22.5-.5s-.22-.5-.5-.5zM12.5 9h-11c-.28 0-.5.22-.5.5s.22.5.5.5h11c.28 0 .5-.22.5-.5s-.22-.5-.5-.5zm1.44-4.29c-.32-.32-.85-.09-.85.35V6h-1C9.89 6 8.21 7.21 7.58 9H2.5c-.28 0-.5.22-.5.5s.22.5.5.5h5.08c.63 1.79 2.31 3 4.17 3h1v.44c0 .44.54.66.85.35l3.79-3.79c.2-.2.2-.51 0-.71l-3.79-3.79z"></path></svg>
+                        测试连接
+                    </button>
+                    <button type="submit" id="save-db-btn">
+                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor"><path d="M17 3H5c-1.11 0-2 .9-2 2v14c0 1.1.89 2 2 2h14c1.1 0 2-.9 2-2V7l-4-4zm2 16H5V5h11.17L19 7.83V19zm-7-7c-1.66 0-3 1.34-3 3s1.34 3 3 3 3-1.34 3-3-1.34-3-3-3zM6 6h9v4H6z"></path></svg>
+                        保存
+                    </button>
+                    <button type="button" id="cancel-db-btn">
+                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12 19 6.41z"></path></svg>
+                        取消
+                    </button>
+                 </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Delete Confirmation Modal -->
+    <div id="delete-confirm-modal" class="modal" style="display: none;"> <!-- Initially hidden -->
+       <div class="modal-content" style="max-width: 400px;"> <!-- Smaller width -->
+            <button class="close-btn" id="delete-confirm-close-btn" title="关闭" aria-label="关闭确认对话框">&times;</button> <!-- Improved labels -->
+            <h2 style="margin-bottom: 15px; border-bottom: none;">确认删除</h2>
+            <p id="delete-confirm-message" style="margin-bottom: 25px; line-height: 1.6;">您确定要删除这个数据库连接配置吗？此操作不可撤销。</p>
+            <div class="modal-actions" style="border-top: none; padding-top: 0;">
+                 <button type="button" id="delete-confirm-cancel-btn" style="background-color: #6c757d; color: white;">
+                     <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12 19 6.41z"></path></svg>
+                     取消
+                 </button>
+                 <button type="button" id="delete-confirm-confirm-btn" style="background-color: #dc3545; color: white;">
+                     <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zm2.46-7.12l1.41-1.41L12 12.59l2.12-2.12 1.41 1.41L13.41 14l2.12 2.12-1.41 1.41L12 15.41l-2.12 2.12-1.41-1.41L10.59 14l-2.13-2.12zM15.5 4l-1-1h-5l-1 1H5v2h14V4z"></path></svg>
+                     确认删除
+                 </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Toast Notification Container -->
+    <div id="toast-container"></div>
+
+    <script>
+        // --- API URLs & Constants ---
+        const apiUrl = 'http://localhost:5670/api/v1/chat/simple_db_chat';
+        const dbListApiUrl = 'http://localhost:5670/api/v1/chat/db/list';
+        const dbSupportTypeApiUrl = 'http://localhost:5670/api/v1/chat/db/support/type';
+        const dbTestConnApiUrl = 'http://localhost:5670/api/v1/chat/db/test/connect';
+        const dbAddApiUrl = 'http://localhost:5670/api/v1/chat/db/add';
+        const dbDeleteApiUrl = 'http://localhost:5670/api/v1/chat/db/delete';
+        // Key for storing ALL conversation data - Remains in localStorage for persistence
+        const CONVERSATIONS_KEY = 'dbgpt_conversations';
+        // Key for storing the ACTIVE conversation ID - Switched to sessionStorage
+        const ACTIVE_CONVERSATION_ID_KEY = 'dbgpt_active_conversation_id_session';
+        // Key for sidebar state - Remains in localStorage
+        const SIDEBAR_COLLAPSED_KEY = 'dbgpt_sidebar_collapsed'; // Key for storing collapsed state
+        // Key for storing the last selected database name - Remains in localStorage
+        const SELECTED_DB_NAME_KEY = 'dbgpt_selected_db_name';
+
+        document.addEventListener('DOMContentLoaded', () => {
+
+            // =======================================================================
+            //  SECTION 1: ALL FUNCTION DEFINITIONS
+            // =======================================================================
+
+            // --- Helper Functions ---
+            function generateUniqueId() {
+                return Date.now().toString(36) + Math.random().toString(36).substring(2, 9);
+            }
+            function escapeHtml(unsafe) {
+                return unsafe
+                    .replace(/&/g, "&amp;")
+                    .replace(/</g, "&lt;")
+                    .replace(/>/g, "&gt;")
+                    .replace(/"/g, "&quot;")
+                    .replace(/'/g, "&#039;");
+            }
+
+            // NEW: Helper function to manage button loading state
+            function setButtonLoadingState(button, isLoading, loadingText = '处理中...') {
+                if (!button) return;
+                if (isLoading) {
+                    // Store original content if not already stored
+                    if (!button.dataset.originalHtml) {
+                        button.dataset.originalHtml = button.innerHTML;
+                    }
+                    button.disabled = true;
+                    button.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="animation: spin 1s linear infinite; margin-right: 4px;"><path d="M21 12a9 9 0 1 1-6.219-8.56"></path></svg> ${escapeHtml(loadingText)}`;
+                } else {
+                    // Restore original content if it was stored
+                    if (button.dataset.originalHtml) {
+                        button.innerHTML = button.dataset.originalHtml;
+                        delete button.dataset.originalHtml; // Clean up dataset
+                    }
+                    button.disabled = false;
+                }
+            }
+
+            // Function to clean error messages from text
+            function cleanupErrorMessages(text) {
+                if (!text) return text;
+
+                // Revised Main Regex: More tolerant of content within parentheses, especially the second set.
+                const detailedErrorRegex = /\s*(\n)?\s*<span\s+style="color:red"\s*>ERROR!<\/span>\s*\([^)]+\)\s*\(.*\)\s*\[SQL:[^\]]+\](?:\s*\(Background\s+on\s+this\s+error\s+at:\s*https?:\/\/[^)]+\))?/gi;
+                text = text.replace(detailedErrorRegex, '');
+
+                // --- Fallbacks remain the same ---
+                // Fallback: Escaped HTML error tags
+                text = text.replace(/&lt;span\s+style="color:red"&gt;ERROR!&lt;\/span&gt;\s*\([^)]*\)\s*\[SQL:[^\]]*\](\s*\([^)]*\))?/g, '');
+                // Fallback: Simple ERROR! variations (handle literal \n or actual newline)
+                text = text.replace(/(\n|\\n)?\s*ERROR!:?\s*\([^)]*\)\s*\[SQL:[^\]]*\](\s*\([^)]*\))?/g, '');
+                // Fallback: Other Error: variations (handle literal \n or actual newline)
+                text = text.replace(/(\n|\\n)?\s*Error:\s*\([^)]*\)\s*\[SQL:[^\]]*\](\s*\([^)]*\))?/g, '');
+
+                // Final Cleanup:
+                text = text.replace(/\\n/g, '\n');       // Replace escaped \n with actual newline
+                text = text.replace(/\n\s*\n+/g, '\n'); // Collapse multiple consecutive newlines
+                text = text.trim();                 // Trim leading/trailing whitespace/newlines
+
+                return text;
+            }
+
+            // --- NEW: Toast Notification Function ---
+            function showToast(message, type = 'info', duration = 3000) {
+                const container = document.getElementById('toast-container');
+                if (!container) {
+                    console.error('Toast container not found!');
+                    return;
+                }
+                const toast = document.createElement('div');
+                toast.classList.add('toast', type);
+                toast.textContent = message;
+                container.appendChild(toast);
+                void toast.offsetWidth; // Trigger reflow
+                toast.classList.add('show');
+                setTimeout(() => {
+                    toast.classList.remove('show');
+                    toast.addEventListener('transitionend', () => {
+                        if (toast.parentNode === container) { container.removeChild(toast); }
+                    });
+                    setTimeout(() => {
+                        if (toast.parentNode === container) { container.removeChild(toast); }
+                    }, 500); // Fallback removal
+                }, duration);
+            }
+            // --- End NEW: Toast Notification Function ---
+
+            function createTableHtml(headers, data) {
+                let tableHtml = '<table class="data-table"><thead><tr>';
+                headers.forEach(header => tableHtml += `<th>${escapeHtml(header)}</th>`);
+                tableHtml += '</tr></thead><tbody>';
+                data.forEach(row => {
+                    tableHtml += '<tr>';
+                    headers.forEach(header => {
+                        const cellData = row[header];
+                        tableHtml += `<td>${cellData !== null && cellData !== undefined ? escapeHtml(String(cellData)) : ''}</td>`;
+                    });
+                    tableHtml += '</tr>';
+                });
+                tableHtml += '</tbody></table>';
+                return tableHtml;
+           }
+            function scrollToBottom() {
+                 // Add checks inside as elements might not be ready when function is defined
+                 if(typeof chatHistory !== 'undefined' && chatHistory) {
+                    setTimeout(() => { chatHistory.scrollTop = chatHistory.scrollHeight; }, 50);
+                 }
+             }
+            function adjustTextareaHeight() {
+                 // Add checks inside
+                 if (typeof chatInput !== 'undefined' && chatInput) {
+                     chatInput.style.height = 'auto';
+                     const maxHeight = 150;
+                     const scrollHeight = chatInput.scrollHeight;
+                     const newHeight = Math.max(38, Math.min(scrollHeight, maxHeight));
+                     chatInput.style.height = newHeight + 'px';
+                     chatInput.style.overflowY = scrollHeight > maxHeight ? 'scroll' : 'hidden';
+                 }
+             }
+
+            // --- Conversation Storage Helpers --- << MODIFIED TO USE sessionStorage FOR ACTIVE ID
+            function getConversations() {
+                try {
+                    // Read ALL conversations from localStorage
+                    const stored = localStorage.getItem(CONVERSATIONS_KEY);
+                    const parsed = stored ? JSON.parse(stored) : {};
+                    return (typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)) ? parsed : {};
+                } catch (e) {
+                    console.error("Error reading conversations from localStorage:", e);
+                    localStorage.removeItem(CONVERSATIONS_KEY);
+                    // Also clear session active ID if storage is corrupt
+                    sessionStorage.removeItem(ACTIVE_CONVERSATION_ID_KEY);
+                    return {};
+                }
+            }
+            function saveConversations(conversations) {
+                try {
+                    // Save ALL conversations to localStorage
+                    localStorage.setItem(CONVERSATIONS_KEY, JSON.stringify(conversations));
+                } catch (e) {
+                    console.error("Error saving conversations to localStorage:", e);
+                    if (e.name === 'QuotaExceededError') {
+                        showToast("无法保存对话记录，可能已达到浏览器存储上限。", 'error');
+                    }
+                }
+            }
+            function getActiveConversationId() {
+                // Read ACTIVE ID from sessionStorage
+                return sessionStorage.getItem(ACTIVE_CONVERSATION_ID_KEY);
+            }
+            function setActiveConversationId(id) {
+                if(id) {
+                   // Write ACTIVE ID to sessionStorage
+                   sessionStorage.setItem(ACTIVE_CONVERSATION_ID_KEY, id);
+                } else {
+                   // Remove ACTIVE ID from sessionStorage
+                   sessionStorage.removeItem(ACTIVE_CONVERSATION_ID_KEY);
+                }
+            }
+            function getActiveConversation() {
+                const conversations = getConversations(); // Reads all from localStorage
+                const activeId = getActiveConversationId(); // Reads active ID from sessionStorage
+                return activeId ? conversations[activeId] : null;
+            }
+
+            // --- DB List & Management Functions ---
+            async function populateDbList() {
+                if (!dbSelect) return;
+                // We'll restore selection from localStorage later
+                dbSelect.innerHTML = '<option value="" disabled selected>加载中...</option>';
+                if(deleteDbButton) deleteDbButton.disabled = true;
+                try {
+                    const response = await fetch(dbListApiUrl);
+                    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+                    const responseData = await response.json();
+                    if (responseData.success && Array.isArray(responseData.data)) {
+                        const databases = responseData.data;
+                        dbSelect.innerHTML = '';
+                        if (databases.length === 0) {
+                            const placeholderOption = document.createElement('option');
+                            placeholderOption.value = ""; placeholderOption.textContent = "请先点击 '+ 添加' 添加连接";
+                            placeholderOption.disabled = true; placeholderOption.selected = true;
+                            dbSelect.appendChild(placeholderOption);
+                            return;
+                        }
+                        const defaultOption = document.createElement('option');
+                        defaultOption.value = ""; defaultOption.textContent = "请选择数据库...";
+                        defaultOption.disabled = true; defaultOption.selected = true;
+                        dbSelect.appendChild(defaultOption);
+                        databases.forEach(db => {
+                            if (!['information_schema', 'mysql', 'performance_schema', 'sys', 'dbgpt', 'test', 'public'].includes(db.db_name.toLowerCase())) {
+                                const option = document.createElement('option');
+                                option.value = db.db_name;
+                                option.textContent = `${escapeHtml(db.db_name)} (${escapeHtml(db.db_type)})`;
+                                dbSelect.appendChild(option);
+                            }
+                        });
+                        // --- START RESTORATION LOGIC ---
+                        const savedDbName = localStorage.getItem(SELECTED_DB_NAME_KEY);
+                        let selectionRestored = false;
+                        if (savedDbName) {
+                            const targetOption = dbSelect.querySelector(`option[value="${savedDbName}"]`);
+                            if (targetOption) {
+                                dbSelect.value = savedDbName;
+                                selectionRestored = true;
+                                console.log(`Restored selected DB from localStorage: ${savedDbName}`);
+                            }
+                        }
+
+                        // If no selection was restored (no saved value or option not found),
+                        // ensure the default placeholder is selected if the list is not empty.
+                        if (!selectionRestored && databases.length > 0) {
+                            const defaultOption = dbSelect.querySelector('option[disabled][selected]');
+                            if (defaultOption) {
+                                dbSelect.value = defaultOption.value; // Should be ""
+                            }
+                        }
+                        // --- END RESTORATION LOGIC ---
+
+                        updateDeleteButtonState();
+                    } else {
+                        throw new Error(responseData.err_msg || '响应格式不正确');
+                    }
+                } catch (error) {
+                    console.error('获取数据库列表出错:', error);
+                    // Use Toast for error
+                    showToast(`加载数据库列表失败: ${error.message}`, 'error');
+                    dbSelect.innerHTML = '';
+                    const errorOption = document.createElement('option');
+                    errorOption.value = ""; errorOption.textContent = "加载列表失败";
+                    errorOption.disabled = true; errorOption.selected = true;
+                    dbSelect.appendChild(errorOption);
+                    if (chatHistory) appendErrorMessage(`加载数据库列表失败: ${error.message}`);
+                    if (deleteDbButton) deleteDbButton.disabled = true;
+                }
+            }
+            function updateDeleteButtonState() {
+                if (!dbSelect || !deleteDbButton) return;
+                const selectedValue = dbSelect.value;
+                deleteDbButton.disabled = !selectedValue;
+           }
+
+            // --- Modal Functions (Add DB) ---
+            function showModal() {
+               if (!addDbModal || !modalElementsFound) return;
+               addDbModal.style.display = 'flex';
+               populateDbTypes();
+               clearModalMessage();
+           }
+            function hideModal() {
+               if (!addDbModal) return;
+               addDbModal.style.display = 'none';
+               if (addDbForm) addDbForm.reset();
+               clearModalMessage();
+           }
+            function clearModalMessage() { if (modalMessageArea) { modalMessageArea.textContent = ''; modalMessageArea.style.color = 'red'; } }
+            function showModalMessage(message, isError = true) { if (modalMessageArea) { modalMessageArea.textContent = message; modalMessageArea.style.color = isError ? 'red' : 'green'; } }
+            async function populateDbTypes() {
+               if (!dbTypeSelect || !modalMessageArea) return;
+               const previouslySelected = dbTypeSelect.value;
+               dbTypeSelect.innerHTML = '<option value="" disabled selected>加载中...</option>';
+               try {
+                   const response = await fetch(dbSupportTypeApiUrl);
+                   if (!response.ok) throw new Error(`HTTP ${response.status}`);
+                   const responseData = await response.json();
+                   if (responseData.success && Array.isArray(responseData.data)) {
+                       dbTypeSelect.innerHTML = '<option value="" disabled selected>请选择类型...</option>';
+                       responseData.data.forEach(typeInfo => {
+                           const option = document.createElement('option');
+                           option.value = typeInfo.db_type;
+                           option.textContent = escapeHtml(typeInfo.db_type);
+                           dbTypeSelect.appendChild(option);
+                       });
+                       if (previouslySelected && dbTypeSelect.querySelector(`option[value="${previouslySelected}"]`)) {
+                          dbTypeSelect.value = previouslySelected;
+                      }
+                   } else {
+                       throw new Error(responseData.err_msg || '响应格式不正确');
+                   }
+               } catch (error) {
+                   console.error('获取数据库类型出错:', error);
+                   // Use Toast for error
+                   showToast(`加载数据库类型失败: ${error.message}`, 'error');
+                   dbTypeSelect.innerHTML = '<option value="" disabled selected>加载类型失败</option>';
+                   // Optionally keep showModalMessage as well
+                   // showModalMessage(`加载数据库类型失败: ${error.message}`);
+               }
+           }
+            function getDbFormData() {
+               if (!modalElementsFound) return null;
+               if (!dbTypeSelect || !document.getElementById('db-alias') || !document.getElementById('db-host') ||
+                   !document.getElementById('db-port') || !document.getElementById('db-user') ||
+                   !document.getElementById('db-password') || !document.getElementById('db-comment')) {
+                   console.error("getDbFormData: Modal form elements missing!");
+                   return null;
+               }
+                return {
+                    db_type: dbTypeSelect.value,
+                    db_name: document.getElementById('db-alias').value.trim(),
+                    db_host: document.getElementById('db-host').value.trim(),
+                    db_port: parseInt(document.getElementById('db-port').value, 10) || 0,
+                    db_user: document.getElementById('db-user').value.trim(),
+                    db_pwd: document.getElementById('db-password').value,
+                    comment: document.getElementById('db-comment').value.trim()
+                };
+           }
+
+            // --- Modal Functions (Delete Confirm) ---
+            function showDeleteConfirmModal(dbName) {
+                if (!deleteConfirmModal || !deleteConfirmMessage || !deleteModalElementsFound) return;
+                dbNameToDelete = dbName;
+                deleteConfirmMessage.textContent = `您确定要删除数据库连接配置 "${escapeHtml(dbName)}" 吗？此操作不可撤销。`;
+                deleteConfirmModal.style.display = 'flex';
+                deleteConfirmCancelBtn.onclick = hideDeleteConfirmModal;
+                deleteConfirmConfirmBtn.onclick = handleDeleteConfirmation; // Note: This calls DB deletion
+                deleteConfirmCloseBtn.onclick = hideDeleteConfirmModal;
+            }
+            function hideDeleteConfirmModal() {
+                if (!deleteConfirmModal) return;
+                deleteConfirmModal.style.display = 'none';
+                dbNameToDelete = null;
+            }
+            async function handleDeleteConfirmation() { // Handles DB deletion
+                if (!dbNameToDelete || !deleteDbButton || !chatHistory) return;
+                const dbName = dbNameToDelete;
+                hideDeleteConfirmModal();
+                // Use helper function for loading state
+                setButtonLoadingState(deleteDbButton, true, '删除中...');
+                try {
+                    const deleteUrl = `${dbDeleteApiUrl}?db_name=${encodeURIComponent(dbName)}`;
+                    const response = await fetch(deleteUrl, { method: 'POST' });
+                    const responseData = await response.json();
+                    if (response.ok && responseData.success) {
+                        showToast(`数据库连接 "${escapeHtml(dbName)}" 已成功删除！`, 'success');
+                        await populateDbList();
+                    } else {
+                        throw new Error(responseData.err_msg || `删除失败 (HTTP ${response.status})`);
+                    }
+                } catch (error) {
+                    console.error('删除数据库连接出错:', error);
+                    showToast(`删除连接 "${escapeHtml(dbName)}" 失败: ${error.message}`, 'error');
+                } finally {
+                    // Use helper function to restore state
+                    setButtonLoadingState(deleteDbButton, false);
+                    updateDeleteButtonState(); // Still need this to re-evaluate based on selection
+                }
+            }
+             function showDeleteConversationConfirm(id, title) { // Handles Conversation deletion confirm
+                 if (!deleteConfirmModal || !deleteConfirmMessage || !deleteModalElementsFound) return;
+                 dbNameToDelete = null; // Clear DB name just in case
+                 deleteConfirmMessage.textContent = `您确定要删除对话 "${title}" 吗？此操作不可撤销。`;
+                 deleteConfirmModal.style.display = 'flex';
+                 deleteConfirmCancelBtn.onclick = hideDeleteConfirmModal;
+                 deleteConfirmConfirmBtn.onclick = () => handleDeleteConversation(id); // Calls Conversation deletion
+                 deleteConfirmCloseBtn.onclick = hideDeleteConfirmModal;
+            }
+            function handleDeleteConversation(idToDelete) { // Handles Conversation deletion
+                if (!idToDelete) return;
+                hideDeleteConfirmModal();
+                console.log(`Deleting conversation: ${idToDelete}`);
+                const conversations = getConversations();
+                if (!conversations[idToDelete]) {
+                    console.warn(`Conversation ${idToDelete} not found for deletion.`);
+                    return;
+                }
+                delete conversations[idToDelete];
+                saveConversations(conversations);
+                const currentActiveId = getActiveConversationId();
+                let newActiveId = null;
+                if (currentActiveId === idToDelete) {
+                    const remainingIds = Object.keys(conversations).sort((a, b) => {
+                        const timeA = parseInt(a, 36); const timeB = parseInt(b, 36);
+                        return (!isNaN(timeA) && !isNaN(timeB)) ? timeB - timeA : b.localeCompare(a);
+                    });
+                    newActiveId = remainingIds.length > 0 ? remainingIds[0] : null;
+                    setActiveConversationId(newActiveId);
+                } else {
+                    newActiveId = currentActiveId;
+                }
+                renderSidebar();
+                if (currentActiveId === idToDelete) {
+                    if (newActiveId) {
+                        loadChatHistory();
+                    } else {
+                        handleNewChat();
+                    }
+                }
+                console.log(`Conversation ${idToDelete} deleted.`);
+           }
+
+            // --- Sidebar Rendering ---
+            function renderSidebar() {
+                if (!conversationListUl) return;
+
+                const conversations = getConversations();
+                const activeId = getActiveConversationId();
+                conversationListUl.innerHTML = '';
+
+                // Helper function to get group name
+                function getGroupName(convDate, todayStart, yesterdayStart, sevenDaysAgoStart, thirtyDaysAgoStart) {
+                    if (convDate >= todayStart) return "今天";
+                    if (convDate >= yesterdayStart) return "昨天";
+                    if (convDate >= sevenDaysAgoStart) return "最近 7 天";
+                    if (convDate >= thirtyDaysAgoStart) return "最近 30 天";
+                    // You can add more specific grouping like month/year here if needed
+                    const year = convDate.getFullYear();
+                    const month = convDate.getMonth() + 1; // Months are 0-indexed
+                    const now = new Date();
+                    if (year === now.getFullYear()) {
+                         return `${month}月`;
+                    } else {
+                         return `${year}年${month}月`;
+                    }
+                }
+
+                // Get time references
+                const now = new Date();
+                const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+                const yesterdayStart = new Date(todayStart.getTime() - 24 * 60 * 60 * 1000);
+                const sevenDaysAgoStart = new Date(todayStart.getTime() - 7 * 24 * 60 * 60 * 1000);
+                const thirtyDaysAgoStart = new Date(todayStart.getTime() - 30 * 24 * 60 * 60 * 1000);
+
+                const sortedIds = Object.keys(conversations).sort((a, b) => {
+                    // Try parsing timestamp from ID (assuming first 8 chars are base36 timestamp)
+                    // Add error handling for potentially non-standard IDs
+                    let timeA = NaN;
+                    let timeB = NaN;
+                    try { timeA = parseInt(a.substring(0, 8), 36); } catch (e) { /* ignore */ }
+                    try { timeB = parseInt(b.substring(0, 8), 36); } catch (e) { /* ignore */ }
+
+                    if (!isNaN(timeA) && !isNaN(timeB)) {
+                        return timeB - timeA; // Sort descending (newest first)
+                    } else {
+                        // Fallback sort if IDs are not standard
+                        return b.localeCompare(a);
+                    }
+                });
+
+                if (sortedIds.length === 0) {
+                    conversationListUl.innerHTML = '<li style="padding: 10px 15px; color: #6c757d; font-style: italic;">无历史对话</li>';
+                    return;
+                }
+
+                let lastHeaderAdded = null;
+
+                sortedIds.forEach(id => {
+                    const conversation = conversations[id];
+                    if (!conversation || !conversation.id) return;
+
+                    let conversationDate = null;
+                    try {
+                        // Extract timestamp from ID - BE CAREFUL with ID format consistency
+                        const timestamp = parseInt(id.substring(0, 8), 36);
+                        if (!isNaN(timestamp)) {
+                            conversationDate = new Date(timestamp);
+                        }
+                    } catch (e) {
+                        console.warn(`Could not parse timestamp from conversation ID: ${id}`);
+                    }
+
+                    // Determine group name only if date is valid
+                    let currentGroupName = null;
+                    if (conversationDate) {
+                        currentGroupName = getGroupName(conversationDate, todayStart, yesterdayStart, sevenDaysAgoStart, thirtyDaysAgoStart);
+                    }
+
+                    // Add group header if it's a new group
+                    if (currentGroupName && currentGroupName !== lastHeaderAdded) {
+                        const headerLi = document.createElement('li');
+                        headerLi.classList.add('group-header');
+                        headerLi.textContent = currentGroupName;
+                        conversationListUl.appendChild(headerLi);
+                        lastHeaderAdded = currentGroupName;
+                    }
+
+                    // Add conversation item
+                    const li = document.createElement('li');
+                    const titleText = conversation.title || `对话 ${id.substring(0, 6)}...`;
+                    li.innerHTML = `
+                        ${escapeHtml(titleText)}
+                        <span class="delete-conv-btn" data-id="${id}" data-title="${escapeHtml(titleText)}" title="删除此对话">&times;</span>
+                    `;
+                    li.dataset.id = id;
+                    if (id === activeId) {
+                        li.classList.add('active');
+                    }
+                    conversationListUl.appendChild(li);
+                });
+            }
+
+            // --- Chat History Load/Save ---
+            function loadChatHistory() {
+                if (!chatHistory) return;
+                chatHistory.innerHTML = '';
+                const activeConversation = getActiveConversation();
+                if (activeConversation && activeConversation.messages && activeConversation.messages.length > 0) {
+                    activeConversation.messages.forEach(msg => {
+                        appendMessageToDOM(msg.content, msg.sender, msg.isError, msg.related_request);
+                    });
+                    console.log(`Loaded history for conversation: ${activeConversation.id}`);
+                } else {
+                    appendInitialWelcomeMessage();
+                    console.log("Loaded empty/new conversation.");
+                }
+                scrollToBottom();
+           }
+            function saveCurrentChatHistory() {
+                if (!chatHistory) return;
+                const activeId = getActiveConversationId();
+                if (!activeId) return;
+                const conversations = getConversations();
+                if (!conversations[activeId]) {
+                    console.error(`Cannot save history: Active conversation ID "${activeId}" not found.`);
+                    return;
+                }
+                const currentMessages = [];
+                let lastUserMessageContent = null;
+                chatHistory.querySelectorAll('.message-bubble').forEach(bubble => {
+                    if (bubble.classList.contains('loading-indicator-bubble') || bubble.classList.contains('initial-welcome')) return;
+
+                    const isUser = bubble.classList.contains('user-message');
+                    const isError = bubble.classList.contains('error-message');
+                    const content = isUser ? bubble.textContent : bubble.innerHTML;
+                    let relatedRequest = null;
+
+                    if (!isUser && lastUserMessageContent && !isError) {
+                        // If it's an AI message following a user message, store the request
+                        relatedRequest = lastUserMessageContent;
+                    }
+
+                    currentMessages.push({
+                        sender: isUser ? 'user' : 'ai',
+                        content: content,
+                        isError: isError,
+                        related_request: relatedRequest // Add related request field
+                    });
+
+                    // Update last user message content for the next iteration
+                    lastUserMessageContent = isUser ? content : null;
+                });
+                conversations[activeId].messages = currentMessages;
+                if (conversations[activeId].title.startsWith("新对话") || conversations[activeId].title === "默认对话") {
+                    const firstUserMessage = currentMessages.find(m => m.sender === 'user');
+                    if (firstUserMessage) {
+                        conversations[activeId].title = firstUserMessage.content.substring(0, 25) + (firstUserMessage.content.length > 25 ? '...' : '');
+                    }
+                }
+                saveConversations(conversations);
+                renderSidebar();
+                console.log(`Chat history saved for conversation: ${activeId}`);
+            }
+
+            // --- Message Appending & Handling ---
+            function appendMessageToDOM(content, sender, isError = false, relatedRequest = null, insertBeforeNode = null) {
+                 if (!chatHistory) return null;
+                 const messageDiv = document.createElement('div');
+                 messageDiv.classList.add('message-bubble');
+                 messageDiv.classList.add(sender === 'user' ? 'user-message' : 'ai-message');
+                 if (isError && sender === 'ai') {
+                     messageDiv.classList.add('error-message');
+                 }
+
+                 let messageContentHtml = '';
+                 if (sender === 'user') {
+                      messageDiv.textContent = content;
+                  } else {
+                       messageContentHtml = content; // Start with the passed content
+                       // Check if relatedRequest exists AND if the button isn't already in the content
+                       if (relatedRequest && !isError && !content.includes('class="regenerate-btn"')) {
+                           const escapedRequest = escapeHtml(relatedRequest);
+                           // Wrap existing content and add actions
+                           messageContentHtml = `
+                              <div>${content}</div>
+                              <div class="message-actions">
+                                  <button class="regenerate-btn" data-original-request="${escapedRequest}" title="重新生成">
+                                      <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" viewBox="0 0 16 16">
+                                        <path fill-rule="evenodd" d="M8 3a5 5 0 1 0 4.546 2.914.5.5 0 0 1 .908-.417A6 6 0 1 1 8 2v1z"/>
+                                        <path d="M8 4.466V.534a.25.25 0 0 1 .41-.192l2.36 1.966c.12.1.12.284 0 .384L8.41 4.658A.25.25 0 0 1 8 4.466z"/>
+                                      </svg>
+                                  </button>
+                              </div>
+                          `;
+                      }
+                      messageDiv.innerHTML = messageContentHtml;
+                 }
+
+                 const welcome = chatHistory.querySelector('.initial-welcome');
+                 if (welcome) {
+                     chatHistory.removeChild(welcome);
+                 }
+
+                 // Insert before specific node if provided, otherwise append to end
+                 if (insertBeforeNode && chatHistory.contains(insertBeforeNode)) {
+                     chatHistory.insertBefore(messageDiv, insertBeforeNode);
+                 } else {
+                     chatHistory.appendChild(messageDiv);
+                 }
+
+                 scrollToBottom(); // May need adjustment if inserting in middle
+                 return messageDiv;
+             }
+            function appendAndSaveMessage(content, sender, isError = false, relatedRequest = null) {
+                // When saving a *new* message, we determine relatedRequest in saveCurrentChatHistory
+                // So, relatedRequest passed here is mainly for direct calls if needed, usually null.
+                const messageDiv = appendMessageToDOM(content, sender, isError, relatedRequest, null); // Always append for direct calls
+                if (messageDiv) {
+                    saveCurrentChatHistory();
+                }
+           }
+            function appendInitialWelcomeMessage() {
+                if (!chatHistory || chatHistory.querySelector('.initial-welcome')) return;
+                // Use the new welcome message
+                appendMessageToDOM('你好，欢迎使用Text-to-SQL！请在对话框中选择数据库，然后输入你的问题开始分析。', 'ai', false, null, null);
+           }
+                       // Restore showLoadingIndicator function to append a new bubble
+            function showLoadingIndicator() {
+                if (!chatHistory) return null;
+                const loadingHTML = getLoadingIndicatorHTML(); // Get the HTML string
+                const messageDiv = document.createElement('div');
+                messageDiv.classList.add('message-bubble', 'ai-message', 'loading-indicator-bubble');
+                messageDiv.innerHTML = loadingHTML;
+                chatHistory.appendChild(messageDiv);
+                scrollToBottom();
+                return messageDiv; // Return the appended element
+            }
+            function getLoadingIndicatorHTML() {
+                return `<div class="loading-message" style="display: flex; align-items: center; justify-content: center; height: 30px;">
+                           <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="animation: spin 1s linear infinite; margin-right: 8px;"><path d="M21 12a9 9 0 1 1-6.219-8.56"></path></svg>
+                           思考中...
+                        </div>
+                        <style>@keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }</style>`;
+            }
+            function appendAiResponseMessage(aiText, sqlQuery, queryResult, dbName, originalRequest, targetNode = null) {
+                try {
+                    if (!aiText) aiText = '';
+                    // Clean error messages from AI text
+                    aiText = cleanupErrorMessages(aiText);
+                    
+                    let html = '';
+                    // Add DB name if available
+                    const currentDb = dbName || (dbSelect ? dbSelect.value : '');
+                    html += `<p style="font-size: 0.8em; color: #6c757d; margin-bottom: 5px; padding: 0 5px;">针对数据库: <strong>${escapeHtml(currentDb)}</strong></p>`;
+                    html += `<p>${escapeHtml(aiText) || '(无文本回答)'}</p>`;
+
+                    // SQL Query Section with Copy Button
+                    if (sqlQuery && sqlQuery !== '(未生成)' && sqlQuery !== '(解析嵌入式 JSON 失败)') {
+                        // 清理可能存在于SQL查询中的错误信息
+                        sqlQuery = cleanupErrorMessages(sqlQuery);
+                        const escapedSql = escapeHtml(sqlQuery);
+                        html += `
+                            <div style="position: relative;">
+                                <h5 style="margin-bottom: 5px; margin-top:10px; font-size: 0.9em; color: #444;">SQL 查询:</h5>
+                                <pre class="sql-code"><code>${escapedSql}</code></pre>
+                                <button class="copy-btn" data-copy-content="${escapedSql}" title="复制代码" aria-label="复制代码">
+                                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" viewBox="0 0 16 16">
+                                        <path d="M13 0H6a2 2 0 0 0-2 2 2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h7a2 2 0 0 0 2-2 2 2 0 0 0 2-2V2a2 2 0 0 0-2-2zm0 13V4a2 2 0 0 0-2-2H5a2 2 0 0 1 2-2h6a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1zM5 0a1 1 0 0 1 1-1h1L4 3V1a1 1 0 0 1 1-1z"/>
+                                        <path d="M13 4a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1h9zM4 5v10h9V5H4z"/>
+                                    </svg>
+                                </button>
+                            </div>`;
+                    }
+
+                    // Query Result Section with Copy Button (for raw data)
+                    if (queryResult && Array.isArray(queryResult) && queryResult.length > 0) {
+                        try {
+                            const headers = Object.keys(queryResult[0]);
+                            const tableHtml = createTableHtml(headers, queryResult);
+                            // Prepare data for copying (e.g., TSV format)
+                            let copyData = '';
+                            queryResult.forEach(row => {
+                                copyData += headers.map(header => String(row[header] !== null && row[header] !== undefined ? row[header] : '').replace(/[\t\n\r]/g, ' ')).join('\t') + '\n'; // Replace all whitespace chars just in case
+                            });
+                            const escapedCopyData = escapeHtml(copyData.trim()); // Escape for attribute
+
+                            html += `
+                                <div style="position: relative;">
+                                    <h5 style="margin-bottom: 5px; margin-top:10px; font-size: 0.9em; color: #444;">查询结果:</h5>
+                                    ${tableHtml}
+                                    <button class="copy-btn" data-copy-content="${escapedCopyData}" title="复制表格数据 (TSV)" aria-label="复制表格数据">
+                                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" viewBox="0 0 16 16">
+                                            <path d="M13 0H6a2 2 0 0 0-2 2 2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h7a2 2 0 0 0 2-2 2 2 0 0 0 2-2V2a2 2 0 0 0-2-2zm0 13V4a2 2 0 0 0-2-2H5a2 2 0 0 1 2-2h6a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1zM5 0a1 1 0 0 1 1-1h1L4 3V1a1 1 0 0 1 1-1z"/>
+                                            <path d="M13 4a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1h9zM4 5v10h9V5H4z"/>
+                                        </svg>
+                                    </button>
+                                </div>`;
+                        } catch (e) {
+                            console.error("Error creating/processing table HTML or copy data:", e);
+                            html += `<p style='color:red;'>渲染表格时出错</p>`;
+                        }
+                    } else if (sqlQuery && sqlQuery !== '(未生成)' && sqlQuery !== '(解析嵌入式 JSON 失败)') {
+                        // Only show if SQL was generated but no table result
+                        html += `<h5 style="margin-bottom: 5px; margin-top:10px; font-size: 0.9em; color: #444;">查询结果:</h5><p>(无表格数据返回)</p>`;
+                    }
+                    appendMessageToDOM(html, 'ai', false, originalRequest, targetNode);
+                    saveCurrentChatHistory(); // Save state after DOM modification
+                } catch (error) {
+                    console.error('处理AI响应出错:', error);
+                    appendErrorMessage(error.message);
+                }
+            }
+            function appendErrorMessage(message) {
+                 const errorContent = `错误: ${escapeHtml(message)}`;
+                 appendAndSaveMessage(errorContent, 'ai', true);
+            }
+
+            // --- Event Handlers ---
+            function handleNewChat() {
+                console.log("Creating new conversation...");
+                const newId = generateUniqueId();
+                const timestamp = new Date();
+                const newTitle = `新对话 ${timestamp.toLocaleTimeString('zh-CN', { hour: '2-digit', minute:'2-digit' })}`;
+                const conversations = getConversations(); // Get all conversations from localStorage
+                conversations[newId] = {
+                    id: newId,
+                    title: newTitle,
+                    messages: [],
+                    selectedDbName: null // Initialize with no DB selected
+                };
+                saveConversations(conversations); // Save updated list to localStorage
+                setActiveConversationId(newId); // Set NEW ACTIVE ID in sessionStorage << USES MODIFIED FN
+                renderSidebar();
+                loadChatHistory(); // Load the (empty) history for the new chat
+
+                // --- Reset DB Selection for New Chat ---
+                if (dbSelect) {
+                    dbSelect.value = ""; // Reset dropdown to placeholder
+                    localStorage.removeItem(SELECTED_DB_NAME_KEY); // Clear stored selection
+                    console.log("Cleared selected DB from localStorage for new chat.");
+                    updateDeleteButtonState(); // Disable delete button
+                }
+                // --- End Reset ---
+
+                if(chatInput) {
+                   chatInput.value = '';
+                   adjustTextareaHeight();
+                   chatInput.focus();
+                }
+                console.log(`New conversation created with ID: ${newId} (set as active in session)`);
+            }
+            async function handleSendMessage() {
+                if (!chatInput || !dbSelect || !sendButton || !chatHistory) return;
+                const userQuestion = chatInput.value.trim();
+                const selectedDbName = dbSelect.value;
+                if (!userQuestion) return;
+                if (!getActiveConversationId()) {
+                    handleNewChat();
+                }
+                if (!selectedDbName) {
+                    // Use Toast for error
+                    showToast('错误：请先选择一个数据库！', 'error');
+                    // appendErrorMessage('错误：请先选择一个数据库！'); // Optionally remove chat message
+                    return;
+                }
+                appendAndSaveMessage(userQuestion, 'user');
+                const currentInput = userQuestion; // Store for potential regeneration association
+                chatInput.value = '';
+                adjustTextareaHeight();
+                sendButton.disabled = true;
+                chatInput.disabled = true;
+                const loadingBubble = showLoadingIndicator();
+                const requestBody = { user_input: currentInput, db_name: selectedDbName };
+                try {
+                    console.log("Sending request body:", JSON.stringify(requestBody));
+                    const response = await fetch(apiUrl, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(requestBody)
+                    });
+                    if(loadingBubble && chatHistory.contains(loadingBubble)) {
+                       chatHistory.removeChild(loadingBubble);
+                    }
+                    const responseData = await response.json();
+                    console.log("Received response:", responseData);
+                    if (!response.ok || !responseData.success) {
+                        const errorMsg = responseData.err_msg || `HTTP 状态码: ${response.status}`;
+                        throw new Error(`API 请求失败: ${errorMsg}`);
+                    }
+                    const resultData = responseData.data;
+                    if (resultData) {
+                        appendAiResponseMessage(
+                            resultData.text_answer,
+                            resultData.sql_query,
+                            resultData.query_result,
+                            selectedDbName,
+                            currentInput // Pass the request here
+                        );
+                    } else {
+                         throw new Error('未能从响应中获取有效数据。');
+                    }
+                } catch (error) {
+                    console.error('请求或处理出错:', error);
+                     if(loadingBubble && chatHistory.contains(loadingBubble)) {
+                        chatHistory.removeChild(loadingBubble);
+                     }
+                    // Keep chat message for error context
+                    appendErrorMessage(error.message);
+                    // Also show Toast for immediate feedback
+                    showToast(`发送消息出错: ${error.message}`, 'error');
+                } finally {
+                    sendButton.disabled = false;
+                    chatInput.disabled = false;
+                    if (chatInput) chatInput.focus();
+                }
+           }
+
+           // --- Initial Setup Function ---
+           function initializeApp() {
+               console.log("DOMContentLoaded complete. Starting initial setup...");
+
+               // Check and apply persisted sidebar state FIRST
+               const isSidebarCollapsedInitial = localStorage.getItem(SIDEBAR_COLLAPSED_KEY) === 'true';
+               if (isSidebarCollapsedInitial && sidebar && document.body) {
+                   sidebar.classList.add('sidebar-collapsed');
+                   document.body.classList.add('sidebar-collapsed-state');
+                   console.log("Applied persisted sidebar collapsed state.");
+               }
+
+               // Initial UI setup
+               if (addDbModal) addDbModal.style.display = 'none';
+               if (deleteConfirmModal) deleteConfirmModal.style.display = 'none';
+
+               populateDbList();
+               updateDeleteButtonState();
+               adjustTextareaHeight();
+
+               // --- Determine initial conversation and set corresponding DB preference --- <<< MODIFIED ORDER
+               console.log("Checking for existing active conversation (from sessionStorage)...");
+               let existingActiveId = getActiveConversationId(); // Reads sessionStorage now
+               console.log(`Value from getActiveConversationId() (sessionStorage): ${existingActiveId}`);
+               const allConversations = getConversations(); // Reads localStorage
+
+               // Ensure active ID is valid
+               if (existingActiveId && !allConversations[existingActiveId]) {
+                    console.log(`Active ID ${existingActiveId} from session not found in localStorage conversations. Clearing.`);
+                    setActiveConversationId(null);
+                    existingActiveId = null;
+               }
+
+               if (!existingActiveId) {
+                    console.log(`No valid active conversation ID found. Will create new one.`);
+                    handleNewChat(); // Creates new chat, sets active ID in session, resets DB
+               } else {
+                   console.log(`Found valid active conversation ID: ${existingActiveId}. Loading existing conversation.`);
+                    // Active ID is valid, load its history and set its DB preference *before* populating list
+                    setInitialDbSelection(); // Sets the global localStorage key based on active conversation
+                    renderSidebar();
+                    loadChatHistory();
+               }
+
+               // Populate DB list *after* potentially setting the initial global key
+               // populateDbList(); // Already called above, or called within handleNewChat if needed
+               updateDeleteButtonState(); // Update based on initial/reset selection
+               adjustTextareaHeight();
+
+               // ... (focus input, log complete)
+               if (chatInput) chatInput.focus();
+               console.log("Initialization complete.");
+           }
+
+           // =======================================================================
+           //  SECTION 2: GET DOM ELEMENTS
+           // =======================================================================
+           const sidebar = document.getElementById('sidebar'); // Get sidebar element itself
+           const sidebarToggleBtn = document.getElementById('sidebar-toggle-btn');
+           const dbSelect = document.getElementById('db-select');
+           const addDbButton = document.getElementById('add-db-btn');
+           const deleteDbButton = document.getElementById('delete-db-btn');
+           const chatHistory = document.getElementById('chat-history');
+           const chatInput = document.getElementById('chat-input');
+           const sendButton = document.getElementById('send-button');
+           const addDbModal = document.getElementById('add-db-modal');
+           const closeModalButton = addDbModal ? addDbModal.querySelector('.close-btn') : null;
+           const cancelDbButton = document.getElementById('cancel-db-btn');
+           const addDbForm = document.getElementById('add-db-form');
+           const dbTypeSelect = document.getElementById('db-type');
+           const testConnButton = document.getElementById('test-conn-btn');
+           const saveDbButton = document.getElementById('save-db-btn');
+           const modalMessageArea = document.getElementById('modal-message-area');
+           const deleteConfirmModal = document.getElementById('delete-confirm-modal');
+           const deleteConfirmMessage = document.getElementById('delete-confirm-message');
+           const deleteConfirmCloseBtn = document.getElementById('delete-confirm-close-btn');
+           const deleteConfirmCancelBtn = document.getElementById('delete-confirm-cancel-btn');
+           const deleteConfirmConfirmBtn = document.getElementById('delete-confirm-confirm-btn');
+           const sidebarNewChatButton = document.getElementById('sidebar-new-chat-btn');
+           const conversationListUl = document.getElementById('conversation-list');
+           let dbNameToDelete = null;
+           let modalElementsFound = addDbModal && closeModalButton && cancelDbButton && addDbForm && dbTypeSelect && testConnButton && saveDbButton && modalMessageArea;
+           let deleteModalElementsFound = deleteConfirmModal && deleteConfirmMessage && deleteConfirmCloseBtn && deleteConfirmCancelBtn && deleteConfirmConfirmBtn;
+
+
+           // =======================================================================
+           //  SECTION 3: ELEMENT EXISTENCE CHECKS & INITIAL STATE APPLICATION
+           // =======================================================================
+           let essentialElementsFound = sidebar && sidebarToggleBtn && dbSelect && addDbButton && deleteDbButton && chatHistory && chatInput && sendButton && addDbModal && deleteConfirmModal && sidebarNewChatButton && conversationListUl;
+
+           if (!essentialElementsFound) {
+                document.body.innerHTML = "<h1>页面加载错误，请刷新。无法找到核心页面元素。</h1>";
+                throw new Error("Essential page element not found!");
+           }
+           // Apply initial sidebar state *after* elements are confirmed found
+           const isSidebarCollapsedInitial = localStorage.getItem(SIDEBAR_COLLAPSED_KEY) === 'true';
+           if (isSidebarCollapsedInitial) {
+               sidebar.classList.add('sidebar-collapsed');
+               document.body.classList.add('sidebar-collapsed-state');
+               console.log("Applied persisted sidebar collapsed state.");
+           }
+           // ... (modal checks)
+
+           // =======================================================================
+           //  SECTION 4: ADD EVENT LISTENERS
+           // =======================================================================
+           // Sidebar Toggle Button Listener
+           if (sidebarToggleBtn && sidebar) {
+               sidebarToggleBtn.addEventListener('click', () => {
+                   sidebar.classList.toggle('sidebar-collapsed');
+                   const isCollapsed = sidebar.classList.contains('sidebar-collapsed');
+                   document.body.classList.toggle('sidebar-collapsed-state', isCollapsed);
+                   localStorage.setItem(SIDEBAR_COLLAPSED_KEY, isCollapsed);
+                   console.log(`Sidebar collapsed state: ${isCollapsed}`);
+               });
+           } else {
+                console.error("Sidebar or Sidebar Toggle Button not found, cannot add listener!");
+           }
+
+           // ... (Add ALL other listeners)
+           if (sidebarNewChatButton) sidebarNewChatButton.addEventListener('click', handleNewChat);
+           if (addDbButton && modalElementsFound) addDbButton.addEventListener('click', showModal);
+           if (closeModalButton) closeModalButton.addEventListener('click', hideModal);
+           if (cancelDbButton) cancelDbButton.addEventListener('click', hideModal);
+           window.addEventListener('click', (event) => { if (addDbModal && event.target == addDbModal) hideModal(); });
+           if (dbSelect) {
+               dbSelect.addEventListener('change', () => {
+                   updateDeleteButtonState();
+                   const selectedDb = dbSelect.value;
+                   if (selectedDb) {
+                       // Save the selected DB name to localStorage (for immediate refresh persistence)
+                       localStorage.setItem(SELECTED_DB_NAME_KEY, selectedDb);
+                       // console.log(`Saved selected DB to localStorage: ${selectedDb}`);
+
+                       // Also save to the active conversation object
+                       const activeId = getActiveConversationId();
+                       if (activeId) {
+                           const conversations = getConversations();
+                           if (conversations[activeId]) {
+                               conversations[activeId].selectedDbName = selectedDb;
+                               saveConversations(conversations);
+                               // console.log(`Saved selected DB to conversation ${activeId}`);
+                           } else {
+                               console.warn("Could not save DB to conversation: Active ID not found in conversations.");
+                           }
+                       } else {
+                            console.warn("Could not save DB to conversation: No active ID.");
+                       }
+                   } else {
+                       // Optional: Remove key if placeholder is selected, or keep last valid one.
+                       // localStorage.removeItem(SELECTED_DB_NAME_KEY);
+
+                       // If placeholder is selected, clear from global storage and active conversation
+                       localStorage.removeItem(SELECTED_DB_NAME_KEY);
+                       const activeId = getActiveConversationId();
+                       if (activeId) {
+                           const conversations = getConversations();
+                           if (conversations[activeId] && conversations[activeId].selectedDbName) {
+                               delete conversations[activeId].selectedDbName;
+                               saveConversations(conversations);
+                               // console.log(`Cleared selected DB from conversation ${activeId}`);
+                           }
+                       }
+                   }
+               });
+           }
+           if (deleteDbButton && deleteModalElementsFound) {
+               deleteDbButton.addEventListener('click', () => {
+                   if (!dbSelect || !dbSelect.value) return;
+                   showDeleteConfirmModal(dbSelect.value);
+               });
+           } else if (deleteDbButton) {
+               deleteDbButton.addEventListener('click', () => { alert("删除确认框加载失败。"); });
+           }
+           // Delete confirm modal background click
+           window.addEventListener('click', (event) => { if (deleteConfirmModal && event.target == deleteConfirmModal) hideDeleteConfirmModal(); });
+           // Conversation list click delegation
+           if (conversationListUl) {
+               conversationListUl.addEventListener('click', (event) => {
+                   const target = event.target;
+                   if (target.classList.contains('delete-conv-btn')) {
+                       event.stopPropagation();
+                       const idToDelete = target.dataset.id;
+                       const titleToDelete = target.dataset.title;
+                       if (idToDelete && titleToDelete) showDeleteConversationConfirm(idToDelete, titleToDelete);
+                   } else if (event.type === 'dblclick') {
+                       console.log("dblclick event detected on conversation list.", event.target);
+                       const clickedLi = target.closest('li[data-id]:not(.group-header)');
+                       console.log("Found closest li[data-id]:", clickedLi);
+                       if (clickedLi && !clickedLi.querySelector('input.edit-title-input')) { // Prevent re-triggering if already editing
+                           console.log("Starting title edit for ID:", clickedLi.dataset.id);
+                           event.preventDefault();
+                           const idToEdit = clickedLi.dataset.id;
+                           const currentTitle = clickedLi.textContent.trim().replace(/\s+×$/, ''); // Remove delete button text
+                           const deleteBtn = clickedLi.querySelector('.delete-conv-btn');
+
+                           console.log("Current Title:", currentTitle);
+
+                           // Create input element
+                           const input = document.createElement('input');
+                           input.type = 'text';
+                           input.value = currentTitle;
+                           input.classList.add('edit-title-input'); // Add class for styling/selection
+                           input.style.width = 'calc(100% - 30px)'; // Adjust width to leave space for delete btn
+                           input.style.padding = '2px 5px';
+                           input.style.margin = '0';
+                           input.style.border = '1px solid #007bff';
+                           input.style.borderRadius = '3px';
+                           input.style.font = 'inherit';
+                           input.style.color = '#000'; /* Ensure text is visible, override inherit */
+
+                           console.log("Input element created, attempting to replace li content...");
+                           // Replace list item content (excluding delete button)
+                           clickedLi.innerHTML = ''; // Clear existing content
+                           clickedLi.appendChild(input);
+                           if (deleteBtn) clickedLi.appendChild(deleteBtn); // Re-append delete button
+
+                           console.log("Content replaced, focusing input...");
+                           input.focus();
+                           input.select();
+
+                           console.log("Adding blur and keydown listeners to input.");
+                           // Add event listeners for saving/canceling
+                           input.addEventListener('blur', handleEditBlur);
+                           input.addEventListener('keydown', handleEditKeyDown);
+                       }
+                       else if (clickedLi && clickedLi.querySelector('input.edit-title-input')) {
+                           console.log("dblclick ignored, already editing this item.");
+                       }
+                       else {
+                           console.log("dblclick ignored, did not find valid li or target was wrong.");
+                       }
+                   } else {
+                       const clickedLi = target.closest('li[data-id]:not(.group-header)');
+                       if (clickedLi && clickedLi.dataset.id) {
+                           const idToSwitch = clickedLi.dataset.id;
+                           const currentActiveId = getActiveConversationId();
+
+                           if (currentActiveId !== idToSwitch) { // Reads sessionStorage
+                               console.log(`Switching active conversation to: ${idToSwitch} (in session)`);
+                               setActiveConversationId(idToSwitch); // Writes to sessionStorage << USES MODIFIED FN
+                               renderSidebar();
+                               loadChatHistory();
+
+                               // --- Restore DB selection for the switched-to conversation ---
+                               const targetConversation = getConversations()[idToSwitch];
+                               const dbNameToRestore = targetConversation?.selectedDbName || null;
+
+                               if (dbSelect) {
+                                   const optionExists = dbSelect.querySelector(`option[value="${dbNameToRestore}"]`);
+                                   if (dbNameToRestore && optionExists) {
+                                       dbSelect.value = dbNameToRestore;
+                                       localStorage.setItem(SELECTED_DB_NAME_KEY, dbNameToRestore);
+                                       console.log(`Restored DB selection for conversation ${idToSwitch}: ${dbNameToRestore}`);
+                                   } else {
+                                       dbSelect.value = ""; // Reset to placeholder
+                                       localStorage.removeItem(SELECTED_DB_NAME_KEY);
+                                       if (dbNameToRestore) {
+                                           console.log(`Could not restore DB ${dbNameToRestore} for conversation ${idToSwitch}: Option not found.`);
+                                       }
+                                   }
+                                   updateDeleteButtonState();
+                               }
+                               // --- End DB Restore ---
+
+                               if (chatInput) {
+                                   chatInput.value = '';
+                                   adjustTextareaHeight();
+                                   console.log(`Input cleared after switching to ${idToSwitch}.`);
+                               }
+                           }
+                       }
+                   }
+               });
+           }
+           // Test Connection Button
+            if (testConnButton && modalElementsFound) {
+                testConnButton.addEventListener('click', async () => {
+                   const formData = getDbFormData();
+                   if (!formData) { showModalMessage("无法获取表单数据!"); return; }
+                   // Basic validation
+                   if (!formData.db_type || !formData.db_name || !formData.db_host || !formData.db_port || !formData.db_user) {
+                      showModalMessage("请填写所有必填字段 (类型, 名称, 主机, 端口, 用户名)"); return;
+                   }
+                   // Use helper function for loading state
+                   setButtonLoadingState(testConnButton, true, '测试中...');
+                   try {
+                       const response = await fetch(dbTestConnApiUrl, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(formData) });
+                       const responseData = await response.json();
+                       if (response.ok && responseData.success && responseData.data === true) {
+                           showToast("连接成功！", 'success');
+                       } else { throw new Error(responseData.err_msg || `测试失败 (HTTP ${response.status})`); }
+                   } catch (error) {
+                       // --- Improved Chinese Error Feedback ---
+                       let userFriendlyError = "测试连接失败，发生未知错误。"; // Default message
+                       const errorMsg = error.message || ''; // Get error message string
+
+                       if (errorMsg.includes('Access denied') || errorMsg.includes('1045')) {
+                           userFriendlyError = "测试连接失败：访问被拒绝，请检查用户名或密码是否正确。";
+                       } else if (errorMsg.includes("Can't connect to MySQL server") || errorMsg.includes('2003')) {
+                           userFriendlyError = "测试连接失败：无法连接到数据库服务器，请检查主机、端口是否正确，以及服务器是否正在运行。";
+                       } else if (errorMsg.includes('Unknown database') || errorMsg.includes('1049')){
+                           userFriendlyError = "测试连接失败：指定的数据库不存在。"; // Less likely here, but good practice
+                       } else {
+                           // Keep the original error for details if needed, but lead with Chinese
+                           userFriendlyError = `测试连接失败: ${errorMsg}`;
+                           // Or a fully generic one:
+                           // userFriendlyError = "测试连接失败，请检查连接信息和服务器状态。";
+                       }
+                       // Use Toast for error
+                       showToast(userFriendlyError, 'error');
+                       // showModalMessage(userFriendlyError); // Optional
+                       // --- End Improved Feedback ---
+                   }
+                   finally {
+                       // Use helper function to restore state
+                       setButtonLoadingState(testConnButton, false);
+                   }
+               });
+           }
+           // Save DB Form Submission
+           if (addDbForm && modalElementsFound) {
+               addDbForm.addEventListener('submit', async (event) => {
+                    event.preventDefault();
+                    const formData = getDbFormData();
+                    if (!formData) { showModalMessage("无法获取表单数据!"); return; }
+                     // Basic validation
+                     if (!formData.db_type || !formData.db_name || !formData.db_host || !formData.db_port || !formData.db_user) {
+                        showModalMessage("请填写所有必填字段 (类型, 名称, 主机, 端口, 用户名)"); return;
+                     }
+                    // Use helper function for loading state
+                    setButtonLoadingState(saveDbButton, true, '保存中...');
+                    try {
+                        const response = await fetch(dbAddApiUrl, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(formData) });
+                        const responseData = await response.json();
+                        if (response.ok && responseData.success) {
+                            const filterList = ['information_schema', 'mysql', 'performance_schema', 'sys', 'dbgpt', 'test', 'public'];
+                            let message = "数据库添加成功！";
+                            let toastType = 'success'; // Default to success
+
+                            if (filterList.includes(formData.db_name.toLowerCase())) {
+                                // If name is in filter list, change message and type
+                                message = `警告：配置 '${escapeHtml(formData.db_name)}' 已保存，但此名称为系统保留或常用过滤名称，将不会在下拉列表中显示或可用。`;
+                                toastType = 'warning'; // Use warning type
+                                // Log this specific case for clarity
+                                console.warn(`Database alias "${formData.db_name}" was saved but is filtered.`);
+                            }
+                            // Use Toast for feedback
+                            showToast(message, toastType);
+                            // Optionally remove modal message if only using toast
+                            // showModalMessage(message, toastType !== 'error');
+                            await populateDbList();
+                            // Hide modal slightly faster if it was just a warning
+                            setTimeout(() => { hideModal(); }, toastType === 'warning' ? 2500 : 1500);
+                        } else { throw new Error(responseData.err_msg || `保存失败 (HTTP ${response.status})`); }
+                    } catch (error) {
+                        // Check for duplicate entry error
+                        let userFriendlyError = `保存失败: ${error.message}`;
+                        if (error.message && (error.message.includes('Duplicate entry') || error.message.includes('1062') || error.message.includes('uk_db'))) {
+                             userFriendlyError = `保存失败: 数据库别名 '${formData.db_name}' 已存在，请使用其他别名。`;
+                         }
+                        // Use Toast for specific or generic error
+                        showToast(userFriendlyError, 'error');
+                        // showModalMessage(userFriendlyError); // Optional
+                    }
+                    finally {
+                        // Use helper function to restore state
+                        setButtonLoadingState(saveDbButton, false);
+                    }
+                });
+          }
+           // Send Button
+           if (sendButton) sendButton.addEventListener('click', handleSendMessage);
+           // Chat Input
+           if (chatInput) {
+               chatInput.addEventListener('keypress', (event) => {
+                   if (event.key === 'Enter' && !event.shiftKey) {
+                       event.preventDefault();
+                       handleSendMessage();
+                   }
+               });
+               chatInput.addEventListener('input', adjustTextareaHeight);
+           }
+
+           // Copy Button Event Delegation & Regenerate Button Event Delegation
+           if (chatHistory) {
+               chatHistory.addEventListener('click', async (event) => {
+                   const target = event.target;
+                   const copyButton = target.closest('.copy-btn');
+                   const regenerateButton = target.closest('.regenerate-btn');
+
+                   if (copyButton) {
+                       // console.log("Copy button clicked."); // Log 1: Button click detected
+                       const contentToCopy = copyButton.dataset.copyContent;
+                       // console.log("Content to copy:", contentToCopy ? contentToCopy.substring(0, 50) + '...' : 'null'); // Log 2: Content retrieved (log first 50 chars)
+
+                       if (contentToCopy) {
+                          try {
+                              // console.log("Attempting to write to clipboard..."); // Log 3: Before clipboard write
+                              const decodedContent = new DOMParser().parseFromString(contentToCopy, 'text/html').documentElement.textContent;
+                              await navigator.clipboard.writeText(decodedContent);
+                              // console.log("Clipboard write successful."); // Log 4: After clipboard write
+
+                              // Use Toast for success
+                              showToast('已复制到剪贴板', 'success', 1500); // Shorter duration for copy
+
+                              // --- START ICON CHANGE ---
+                              // console.log("Starting icon change logic..."); // Log 5: Before icon change
+                              const originalIconHTML = copyButton.innerHTML; // Store original icon
+                              const checkIconSVG = `
+                                  <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" viewBox="0 0 16 16">
+                                    <path d="M13.854 3.646a.5.5 0 0 1 0 .708l-7 7a.5.5 0 0 1-.708 0l-3.5-3.5a.5.5 0 1 1 .708-.708L6.5 10.293l6.646-6.647a.5.5 0 0 1 .708 0z"/>
+                                  </svg>`;
+                              copyButton.innerHTML = checkIconSVG; // Set checkmark icon
+                              copyButton.classList.add('copied'); // Add class for styling (already defined in CSS)
+                              copyButton.disabled = true; // Temporarily disable button
+                              // console.log("Icon changed to checkmark, class added, button disabled."); // Log 6: Icon changed
+
+                              // Revert after a delay
+                              setTimeout(() => {
+                                  if (copyButton) { // Check if button still exists
+                                      copyButton.innerHTML = originalIconHTML;
+                                      copyButton.classList.remove('copied');
+                                      copyButton.disabled = false;
+                                      // console.log("Icon reverted, class removed, button enabled."); // Log 7: Icon reverted
+                                  } else {
+                                      // console.log("Button no longer exists when trying to revert icon."); // Log 8: Button gone during revert
+                                  }
+                              }, 1500); // Match toast duration or slightly longer
+                              // --- END ICON CHANGE ---
+
+                          } catch (err) {
+                               // console.error('Failed to copy: ', err); // Log 9: Error during copy
+                               // Use Toast for error
+                               showToast('复制失败！您的浏览器可能不支持此功能或未授予权限。', 'error');
+                               // alert('复制失败！...'); // Remove alert
+                           }
+                      } else {
+                          // console.warn("Copy button clicked, but no content found in data-copy-content attribute."); // Log 10: No content to copy
+                      }
+                   } else if (regenerateButton) {
+                       // console.log("Regenerate button clicked."); // Log R1: Button click detected
+                       const originalRequest = regenerateButton.dataset.originalRequest;
+                       const currentDb = dbSelect.value;
+                       const targetBubble = regenerateButton.closest('.message-bubble.ai-message');
+  
+                       // console.log(`Regenerate: Original Request: ${originalRequest ? originalRequest.substring(0,30) + '...' : 'null'}`); // Log R2
+                       // console.log(`Regenerate: Current DB: ${currentDb}`); // Log R3
+                       // console.log(`Regenerate: Target Bubble found: ${!!targetBubble}`); // Log R4
+ 
+                       if (originalRequest && targetBubble) {
+                           const nextNode = targetBubble.nextSibling; // Get the node after the target bubble
+                           // console.log(`Regenerating response for request: "${originalRequest}"`);
+                           if (!currentDb) { 
+                               // console.error("Regenerate Error: No database selected."); // Log R5: Error - No DB
+                               showToast('错误：请先选择一个数据库！', 'error'); 
+                               return; 
+                           }
+  
+                            // Disable input/buttons
+                           // console.log("Regenerate: Disabling inputs."); // Log R6
+                            if(sendButton) sendButton.disabled = true;
+                            if(chatInput) chatInput.disabled = true;
+  
+                             // Replace original bubble content with loading indicator
+                           // console.log("Regenerate: Replacing bubble with loading indicator."); // Log R7
+                            targetBubble.innerHTML = getLoadingIndicatorHTML();
+                            scrollToBottom();
+  
+                             // Prepare and send API request
+                            const requestBody = { user_input: originalRequest, db_name: currentDb };
+                            try {
+                                // console.log("Regenerate: Sending API request...", requestBody); // Log R8
+                                // Restore the correct fetch options: method, headers, body
+                                const response = await fetch(apiUrl, {
+                                    method: 'POST',
+                                    headers: { 'Content-Type': 'application/json' },
+                                    body: JSON.stringify(requestBody)
+                                });
+                                // No loading bubble to remove
+ 
+                                const responseData = await response.json();
+                                // Ensure error handling checks for both network and success flags
+                                if (!response.ok) { // Check network status first
+                                     throw new Error(`HTTP error! status: ${response.status}`);
+                                }
+                                if (!responseData.success) { // Then check application-level success
+                                    // console.error("Regenerate API Error (success: false):", responseData.err_msg); // Log R9: API failure
+                                    throw new Error(responseData.err_msg || 'API returned failure but no error message.');
+                                }
+ 
+                                const resultData = responseData.data;
+                                // console.log("Regenerate: API Success, Data:", resultData); // Log R10: API Success
+                                if (resultData) {
+                                    // --- START NEW REPLACEMENT LOGIC ---
+                                    // 1. Create the new message content HTML
+                                    let aiContent = '';
+                                    if (currentDb) aiContent += `<p style="font-size: 0.8em; color: #6c757d; margin-bottom: 5px; padding: 0 5px;">针对数据库: <strong>${escapeHtml(currentDb)}</strong></p>`;
+                                    aiContent += `<p>${escapeHtml(resultData.text_answer) || '(无文本回答)'}</p>`;
+
+                                    // SQL Query Section
+                                    if (resultData.sql_query && resultData.sql_query !== '(未生成)' && resultData.sql_query !== '(解析嵌入式 JSON 失败)') {
+                                        const escapedSql = escapeHtml(resultData.sql_query);
+                                        aiContent += `
+                                            <div style="position: relative;">
+                                                <h5 style="margin-bottom: 5px; margin-top:10px; font-size: 0.9em; color: #333;">SQL 查询:</h5>
+                                                <pre class="sql-code"><code>${escapedSql}</code></pre>
+                                                <button class="copy-btn" data-copy-content="${escapedSql}" title="复制代码" aria-label="复制代码">
+                                                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" viewBox="0 0 16 16"><path d="M13 0H6a2 2 0 0 0-2 2 2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h7a2 2 0 0 0 2-2 2 2 0 0 0 2-2V2a2 2 0 0 0-2-2zm0 13V4a2 2 0 0 0-2-2H5a2 2 0 0 1 2-2h6a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1zM5 0a1 1 0 0 1 1-1h1L4 3V1a1 1 0 0 1 1-1z"/><path d="M13 4a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1h9zM4 5v10h9V5H4z"/></svg>
+                                                </button>
+                                            </div>`;
+                                    }
+
+                                    // Query Result Section
+                                    if (resultData.query_result && Array.isArray(resultData.query_result) && resultData.query_result.length > 0) {
+                                        try {
+                                            const headers = Object.keys(resultData.query_result[0]);
+                                            const tableHtml = createTableHtml(headers, resultData.query_result);
+                                            let copyData = '';
+                                            resultData.query_result.forEach(row => { copyData += headers.map(header => String(row[header] !== null && row[header] !== undefined ? row[header] : '').replace(/[\t\n\r]/g, ' ')).join('\t') + '\n'; });
+                                            const escapedCopyData = escapeHtml(copyData.trim());
+
+                                            aiContent += `
+                                                <div style="position: relative;">
+                                                    <h5 style="margin-bottom: 5px; margin-top:10px; font-size: 0.9em; color: #333;">查询结果:</h5>
+                                                    ${tableHtml}
+                                                    <button class="copy-btn" data-copy-content="${escapedCopyData}" title="复制表格数据 (TSV)" aria-label="复制表格数据">
+                                                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" viewBox="0 0 16 16"><path d="M13 0H6a2 2 0 0 0-2 2 2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h7a2 2 0 0 0 2-2 2 2 0 0 0 2-2V2a2 2 0 0 0-2-2zm0 13V4a2 2 0 0 0-2-2H5a2 2 0 0 1 2-2h6a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1zM5 0a1 1 0 0 1 1-1h1L4 3V1a1 1 0 0 1 1-1z"/><path d="M13 4a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1h9zM4 5v10h9V5H4z"/></svg>
+                                                    </button>
+                                                </div>`;
+                                        } catch (e) {
+                                            console.error("Error creating/processing table HTML or copy data:", e);
+                                            aiContent += `<p style='color:red;'>渲染表格时出错</p>`;
+                                        }
+                                    } else if (resultData.sql_query && resultData.sql_query !== '(未生成)' && resultData.sql_query !== '(解析嵌入式 JSON 失败)') {
+                                        aiContent += `<h5 style="margin-bottom: 5px; margin-top:10px; font-size: 0.9em; color: #333;">查询结果:</h5><p>(无表格数据返回)</p>`;
+                                    }
+
+                                    // Add Regenerate button
+                                     if (originalRequest) { // Use originalRequest from the handler scope
+                                         const escapedRequest = escapeHtml(originalRequest);
+                                         aiContent = `
+                                             <div>${aiContent}</div>
+                                             <div class="message-actions">
+                                                 <button class="regenerate-btn" data-original-request="${escapedRequest}" title="重新生成">
+                                                     <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" viewBox="0 0 16 16"><path fill-rule="evenodd" d="M8 3a5 5 0 1 0 4.546 2.914.5.5 0 0 1 .908-.417A6 6 0 1 1 8 2v1z"/><path d="M8 4.466V.534a.25.25 0 0 1 .41-.192l2.36 1.966c.12.1.12.284 0 .384L8.41 4.658A.25.25 0 0 1 8 4.466z"/></svg>
+                                                 </button>
+                                             </div>
+                                         `;
+                                     }
+
+                                    // 2. Create the new message bubble element
+                                    const newMessageDiv = document.createElement('div');
+                                    newMessageDiv.classList.add('message-bubble', 'ai-message');
+                                    newMessageDiv.innerHTML = aiContent;
+
+                                    // 3. Replace the old bubble (targetBubble) with the new one
+                                    if (chatHistory.contains(targetBubble)) {
+                                        chatHistory.replaceChild(newMessageDiv, targetBubble);
+                                        // console.log("Regenerate: Replaced old bubble with new response."); // Log R11 (modified)
+                                    } else {
+                                        console.error("Regenerate Error: targetBubble not found in chatHistory during replacement.");
+                                        // Fallback: append to end if targetBubble somehow disappeared
+                                        chatHistory.appendChild(newMessageDiv);
+                                    }
+                                    // --- END NEW REPLACEMENT LOGIC ---
+
+                                    saveCurrentChatHistory(); // Save state after DOM modification
+
+                                } else {
+                                     // console.error("Regenerate API Error: Succeeded but no data returned."); // Log R13: No data
+                                    throw new Error('API succeeded but returned no data.');
+                                }
+                            } catch (error) {
+                                // console.error('Regenerate: Caught Error:', error); // Log R14: Catch block
+                                // ... (remove old bubble if exists)
+                                if (chatHistory.contains(targetBubble)) {
+                                    // console.log("Regenerate: Removing old bubble in catch block."); // Log R15
+                                    chatHistory.removeChild(targetBubble);
+                                }
+                                // Append error message at the end
+                                // Check if error is likely JSON parsing error due to non-JSON response
+                                // console.log("Regenerate: Appending error message."); // Log R16
+                                if (error instanceof SyntaxError && error.message.includes("valid JSON")) {
+                                    appendErrorMessage(`重新生成失败：服务器未返回有效响应。请检查网络连接或服务器状态。`);
+                                } else {
+                                    appendErrorMessage(`重新生成失败: ${error.message}`);
+                                }
+                                // Also show Toast for immediate feedback
+                                showToast(`重新生成失败: ${error.message}`, 'error');
+                            } finally {
+                                // ... (Re-enable buttons)
+                                // console.log("Regenerate: Re-enabling inputs in finally block."); // Log R17
+                                if(sendButton) sendButton.disabled = false;
+                                if(chatInput) chatInput.disabled = false;
+                                if (chatInput) chatInput.focus();
+                            }
+                        } else {
+                            // console.warn("Regenerate button clicked but original request or target bubble not found.", { originalRequest, targetBubble }); // Log R18: Request or Bubble missing
+                        }
+                    }
+                });
+           }
+
+           // =======================================================================
+           //  SECTION 5: START THE APP
+           // =======================================================================
+           initializeApp();
+
+           // --- Handlers for inline title editing ---
+           function handleEditBlur(event) {
+               saveOrCancelEdit(event.target, 'blur');
+           }
+
+           function handleEditKeyDown(event) {
+               if (event.key === 'Enter') {
+                   event.preventDefault();
+                   saveOrCancelEdit(event.target, 'enter');
+               } else if (event.key === 'Escape') {
+                   saveOrCancelEdit(event.target, 'escape');
+               }
+           }
+
+           function saveOrCancelEdit(inputElement, action) {
+               const li = inputElement.closest('li[data-id]');
+               if (!li) return;
+               const id = li.dataset.id;
+               const originalTitle = getConversations()[id]?.title || '对话'; // Get original title for cancel
+               const newTitle = inputElement.value.trim();
+               const deleteBtnHTML = li.querySelector('.delete-conv-btn')?.outerHTML || '';
+
+               // Remove listeners to prevent memory leaks
+               inputElement.removeEventListener('blur', handleEditBlur);
+               inputElement.removeEventListener('keydown', handleEditKeyDown);
+
+               if (action === 'escape' || (action !== 'enter' && action !== 'blur')) {
+                   // Cancel or unknown action: Restore original title
+                   li.innerHTML = `${escapeHtml(originalTitle)} ${deleteBtnHTML}`;
+               } else if (newTitle && newTitle !== originalTitle) {
+                   // Save: Update title and display
+                   updateConversationTitle(id, newTitle);
+                   li.innerHTML = `${escapeHtml(newTitle)} ${deleteBtnHTML}`;
+                    // Re-check active state in case title change affected it (unlikely but safe)
+                   if(getActiveConversationId() === id) li.classList.add('active');
+               } else {
+                   // No change or empty title: Restore original title
+                   li.innerHTML = `${escapeHtml(originalTitle)} ${deleteBtnHTML}`;
+               }
+               // Ensure the active class is correctly set after potential innerHTML changes
+                if(getActiveConversationId() === id) li.classList.add('active');
+                else li.classList.remove('active');
+           }
+
+           function updateConversationTitle(id, newTitle) {
+               if (!id || typeof newTitle !== 'string') return; // Allow empty title if user clears it, restore original later
+               const conversations = getConversations();
+               if (conversations[id]) {
+                   conversations[id].title = newTitle.trim();
+                   saveConversations(conversations);
+                   // console.log(`Conversation ${id} title updated to: ${conversations[id].title}`);
+                   // No need to re-render sidebar here, handled by caller
+               } else {
+                   console.warn(`Conversation ${id} not found for title update.`);
+               }
+           }
+
+           // Separate listener for Double Click events on conversation list for renaming
+           if (conversationListUl) {
+                conversationListUl.addEventListener('dblclick', (event) => {
+                    const target = event.target;
+                    // console.log("dblclick event detected on conversation list.", target);
+                    const clickedLi = target.closest('li[data-id]:not(.group-header)');
+                    // console.log("Found closest li[data-id]:", clickedLi);
+                    if (clickedLi && !clickedLi.querySelector('input.edit-title-input')) { // Prevent re-triggering if already editing
+                        // console.log("Starting title edit for ID:", clickedLi.dataset.id);
+                        event.preventDefault();
+                        const idToEdit = clickedLi.dataset.id;
+                        const currentTitle = clickedLi.textContent.trim().replace(/\s+×$/, ''); // Remove delete button text
+                        const deleteBtn = clickedLi.querySelector('.delete-conv-btn');
+  
+                        // console.log("Current Title:", currentTitle);
+  
+                         // Create input element
+                         const input = document.createElement('input');
+                         input.type = 'text';
+                         input.value = currentTitle;
+                         input.classList.add('edit-title-input'); // Add class for styling/selection
+                         input.style.width = 'calc(100% - 30px)'; // Adjust width to leave space for delete btn
+                         input.style.padding = '2px 5px';
+                         input.style.margin = '0';
+                         input.style.border = '1px solid #007bff';
+                         input.style.borderRadius = '3px';
+                         input.style.font = 'inherit';
+                         input.style.color = '#000'; /* Ensure text is visible, override inherit */
+  
+                         console.log("Input element created, attempting to replace li content...");
+                         // Replace list item content (excluding delete button)
+                         clickedLi.innerHTML = ''; // Clear existing content
+                         clickedLi.appendChild(input);
+                         if (deleteBtn) clickedLi.appendChild(deleteBtn); // Re-append delete button
+  
+                         console.log("Content replaced, focusing input...");
+                         input.focus();
+                         input.select();
+  
+                         console.log("Adding blur and keydown listeners to input.");
+                         // Add event listeners for saving/canceling
+                         input.addEventListener('blur', handleEditBlur);
+                         input.addEventListener('keydown', handleEditKeyDown);
+                     }
+                     else if (clickedLi && clickedLi.querySelector('input.edit-title-input')) {
+                         console.log("dblclick ignored, already editing this item.");
+                     }
+                     else {
+                         console.log("dblclick ignored, did not find valid li or target was wrong.");
+                     }
+                });
+           }
+
+           // --- Helper to set initial DB selection based on active conversation ---
+           function setInitialDbSelection() {
+               const activeId = getActiveConversationId();
+               if (!activeId) return;
+               const conversations = getConversations();
+               const initialConversation = conversations[activeId];
+               const initialDbName = initialConversation?.selectedDbName;
+
+               if (initialDbName) {
+                    // Set the global key *before* populating the list
+                   localStorage.setItem(SELECTED_DB_NAME_KEY, initialDbName);
+                   console.log(`Set initial global DB key from active conversation ${activeId}: ${initialDbName}`);
+               } else {
+                   localStorage.removeItem(SELECTED_DB_NAME_KEY);
+                   console.log(`Active conversation ${activeId} has no saved DB selection, cleared global key.`);
+               }
+           }
+
+       });
+    </script>
+</body>
+</html> 
